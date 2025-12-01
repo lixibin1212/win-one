@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>后端连接调试</title>
+    <style>
+        body { font-family: monospace; padding: 20px; }
+        button { padding: 10px 20px; margin: 10px; font-size: 16px; }
+        pre { background: #f0f0f0; padding: 10px; border-radius: 5px; }
+        .success { color: green; }
+        .error { color: red; }
+    </style>
+</head>
+<body>
+    <h1>后端连接诊断工具</h1>
+    <p>当前页面: <span id="currentUrl"></span></p>
+    <p>后端地址: <strong>http://localhost:8000</strong></p>
+    
+    <button onclick="test1()">测试 1: 简单 GET 请求</button>
+    <button onclick="test2()">测试 2: CORS GET 请求</button>
+    <button onclick="test3()">测试 3: 注册 POST 请求</button>
+    <button onclick="clearLog()">清空日志</button>
+    
+    <h2>测试结果:</h2>
+    <pre id="log"></pre>
+
+    <script>
+        document.getElementById('currentUrl').textContent = window.location.href;
+        
+        const log = document.getElementById('log');
+        
+        function addLog(msg, isError = false) {
+            const time = new Date().toLocaleTimeString();
+            const color = isError ? 'error' : 'success';
+            log.innerHTML += `<span class="${color}">[${time}] ${msg}</span>\n`;
+        }
+        
+        function clearLog() {
+            log.innerHTML = '';
+        }
+        
+        async function test1() {
+            addLog('=== 测试 1: 简单 GET 请求 ===');
+            try {
+                const res = await fetch('http://localhost:8000/');
+                addLog(`✅ 成功! 状态码: ${res.status}`);
+                const data = await res.json();
+                addLog(`响应数据: ${JSON.stringify(data)}`);
+            } catch (err) {
+                addLog(`❌ 失败: ${err.message}`, true);
+                addLog(`错误类型: ${err.name}`, true);
+                console.error(err);
+            }
+        }
+        
+        async function test2() {
+            addLog('=== 测试 2: CORS GET 请求 ===');
+            try {
+                const res = await fetch('http://localhost:8000/', {
+                    method: 'GET',
+                    mode: 'cors',
+                    credentials: 'include',
+                });
+                addLog(`✅ 成功! 状态码: ${res.status}`);
+                const data = await res.json();
+                addLog(`响应数据: ${JSON.stringify(data)}`);
+            } catch (err) {
+                addLog(`❌ 失败: ${err.message}`, true);
+                console.error(err);
+            }
+        }
+        
+        async function test3() {
+            addLog('=== 测试 3: 注册 POST 请求 ===');
+            try {
+                const res = await fetch('http://localhost:8000/register', {
+                    method: 'POST',
+                    mode: 'cors',
+                    credentials: 'include',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        username: 'testuser123',
+                        email: 'test@example.com',
+                        password: 'Test123456',
+                        captcha_token: 'test-token'
+                    })
+                });
+                addLog(`✅ 请求已发送! 状态码: ${res.status}`);
+                const data = await res.json();
+                addLog(`响应数据: ${JSON.stringify(data, null, 2)}`);
+            } catch (err) {
+                addLog(`❌ 失败: ${err.message}`, true);
+                console.error(err);
+            }
+        }
+    </script>
+</body>
+</html>

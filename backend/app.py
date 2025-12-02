@@ -81,6 +81,14 @@ REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
 # CORS
 CORS_ORIGINS = os.getenv("CORS_ALLOW_ORIGINS", "http://localhost:3000,http://localhost:3002").split(",")
 
+# === Sora API Configuration ===
+SORA_API_KEY = "sk-a4f3a6be3c7a4c6d95633f4092586b59"
+SORA_BASE_URL = "https://api.grsai.com/v1"
+
+# === Nano Banana API Configuration ===
+NANO_API_KEY = "sk-pKzjE8Mz3UNxSWBd39s8DvXVNCf1g6v4CNbmhzb0Vv0koFVl"
+NANO_BASE_URL = "https://api.xgai.site/v1"
+
 # === 初始化 FastAPI ===
 app = FastAPI(title="安全认证系统", version="2.0.0")
 
@@ -170,6 +178,20 @@ class ResetPasswordReq(BaseModel):
         if not re.search(r'[0-9]', v):
             raise ValueError('密码必须包含数字')
         return v
+
+class SoraGenerateRequest(BaseModel):
+    prompt: str
+    url: Optional[str] = None
+    aspectRatio: str = "9:16"
+    duration: int = 10
+    size: str = "small"
+
+class NanoGenerateRequest(BaseModel):
+    model: str
+    prompt: str
+    aspect_ratio: Optional[str] = "16:9"
+    image_size: Optional[str] = "1K"
+    images: Optional[list[str]] = None
 
 # ============================================
 # 数据库工具函数
@@ -1005,6 +1027,120 @@ async def get_task_status(task_id: str, user = Depends(get_current_user)):
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+# === Sora Proxy APIs ===
+
+@app.post("/api/proxy/sora/generate")
+async def sora_generate(req: SoraGenerateRequest, user = Depends(get_current_user)):
+    """Sora 视频生成代理接口"""
+    url = f"{SORA_BASE_URL}/video/sora-video"
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {SORA_API_KEY}"
+    }
+    payload = {
+        "model": "sora-2",
+        "prompt": req.prompt,
+        "webHook": "-1",
+        "aspectRatio": req.aspectRatio,
+        "duration": req.duration,
+        "size": req.size,
+        "shutProgress": False
+    }
+    if req.url:
+        payload["url"] = req.url
+
+    async with httpx.AsyncClient() as client:
+        try:
+            resp = await client.post(url, json=payload, headers=headers, timeout=30.0)
+            if resp.status_code != 200:
+                logger.error(f"Sora API Error: {resp.text}")
+                raise HTTPException(status_code=resp.status_code, detail="Sora API 调用失败")
+            
+            data = resp.json()
+            if data.get("code") != 0:
+                raise HTTPException(status_code=400, detail=data.get("msg", "Unknown error"))
+            
+            return {"task_id": data["data"]["id"]}
+        except httpx.RequestError as e:
+            logger.error(f"Sora Request Error: {e}")
+            raise HTTPException(status_code=500, detail="Sora API 请求异常")
+
+@app.get("/api/proxy/sora/result/{task_id}")
+async def sora_result(task_id: str, user = Depends(get_current_user)):
+    """Sora 结果查询代理接口"""
+    url = f"{SORA_BASE_URL}/draw/result"
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {SORA_API_KEY}"
+    }
+    # 注意：该接口是 POST 请求查询结果
+    payload = {"id": task_id}
+
+    async with httpx.AsyncClient() as client:
+        try:
+            resp = await client.post(url, json=payload, headers=headers, timeout=30.0)
+            if resp.status_code != 200:
+                raise HTTPException(status_code=resp.status_code, detail="Sora Result API 调用失败")
+            
+            data = resp.json()
+            if data.get("code") != 0:
+                return {"status": "failed", "error": data.get("msg")}
+            
+            inner_data = data.get("data", {})
+            status = inner_data.get("status")
+            
+            # 映射状态到前端通用格式
+            # Sora status: 'succeeded', 'processing' (假设), 'failed'
+            if status == "succeeded":
+                results = inner_data.get("results", [])
+                video_url = results[0].get("url") if results else None
+                return {"status": "succeeded", "video_url": video_url, "raw": inner_data}
+            elif status == "failed":
+                return {"status": "failed", "error": inner_data.get("failure_reason")}
+            else:
+                return {"status": "processing", "progress": inner_data.get("progress", 0)}
+                
+        except httpx.RequestError as e:
+            raise HTTPException(status_code=500, detail="Sora Result API 请求异常")
+
+# === Nano Banana Proxy APIs ===
+
+@app.post("/api/proxy/nano/generate")
+async def nano_generate(req: NanoGenerateRequest, user = Depends(get_current_user)):
+    """Nano Banana 图片生成代理接口"""
+    url = f"{NANO_BASE_URL}/images/generations"
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {NANO_API_KEY}"
+    }
+    
+    payload = {
+        "model": req.model,
+        "prompt": req.prompt,
+        "aspect_ratio": req.aspect_ratio,
+        "response_format": "url"
+    }
+    
+    if req.model == "nano-banana-2" and req.image_size:
+        payload["image_size"] = req.image_size
+        
+    if req.images:
+        payload["image"] = req.images
+
+    async with httpx.AsyncClient() as client:
+        try:
+            resp = await client.post(url, json=payload, headers=headers, timeout=60.0)
+            if resp.status_code != 200:
+                logger.error(f"Nano API Error: {resp.text}")
+                raise HTTPException(status_code=resp.status_code, detail="Nano API 调用失败")
+            
+            data = resp.json()
+            # Nano API 直接返回结果，不需要轮询
+            return data
+        except httpx.RequestError as e:
+            logger.error(f"Nano Request Error: {e}")
+            raise HTTPException(status_code=500, detail="Nano API 请求异常")
 
 # === 启动事件 ===
 @app.on_event("startup")

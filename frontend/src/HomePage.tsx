@@ -37,6 +37,7 @@ import MovieCreationIcon from '@mui/icons-material/MovieCreation';
 import ImageSearchIcon from '@mui/icons-material/ImageSearch';
 import LogoutIcon from '@mui/icons-material/Logout';
 import PlayCircleOutlineIcon from '@mui/icons-material/PlayCircleOutline';
+import PhotoLibraryIcon from '@mui/icons-material/PhotoLibrary';
 
 const theme = createTheme({
   palette: {
@@ -149,17 +150,28 @@ const HomePage = () => {
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
   
   // 标签页状态
-  const [activeTab, setActiveTab] = useState<'veo2' | 'veo3' | 'veo3+'>('veo2');
+  const [activeTab, setActiveTab] = useState<'veo2' | 'veo3' | 'veo3+' | 'sora2'>('veo2');
+  // 模块选择状态
+  const [currentModule, setCurrentModule] = useState<'veo' | 'sora' | 'nano'>('veo');
 
   // 模型选择状态
   const [selectedModel, setSelectedModel] = useState<string>('veo2');
   
+  // Nano Banana states
+  const [nanoModel, setNanoModel] = useState('nano-banana-2');
+  const [nanoImageSize, setNanoImageSize] = useState('1K');
+  const [nanoImages, setNanoImages] = useState<string[]>([]);
+  const [nanoInputImage, setNanoInputImage] = useState('');
+
   // 表单状态
   const [prompt, setPrompt] = useState('');
   const [aspectRatio, setAspectRatio] = useState('16:9');
+  const [duration, setDuration] = useState<number>(10);
+  const [size, setSize] = useState<string>('small');
   const [image1, setImage1] = useState('');
   const [image2, setImage2] = useState('');
   const [image3, setImage3] = useState('');
+  const [soraUrl, setSoraUrl] = useState(''); // Sora 专用 URL
   const [isGenerating, setIsGenerating] = useState(false);
   const [taskId, setTaskId] = useState<string | null>(null);
   const [generationResult, setGenerationResult] = useState<any>(null);
@@ -198,7 +210,13 @@ const HomePage = () => {
       const checkStatus = async () => {
         try {
           const token = localStorage.getItem('access_token');
-          const res = await fetch(`${API_BASE}/api/tasks/${taskId}`, {
+          // 根据当前模块选择不同的查询接口
+          // Nano 模块不需要轮询，直接返回结果，所以这里不需要处理 nano
+          const statusUrl = currentModule === 'sora' 
+            ? `${API_BASE}/api/proxy/sora/result/${taskId}`
+            : `${API_BASE}/api/tasks/${taskId}`;
+
+          const res = await fetch(statusUrl, {
             headers: { Authorization: `Bearer ${token}` }
           });
           if (res.ok) {
@@ -214,7 +232,7 @@ const HomePage = () => {
             } else if (data.status === 'failed' || data.error) {
                setIsGenerating(false);
                setTaskId(null);
-               setSnackbarMsg('视频生成失败: ' + (data.error?.message || '未知错误'));
+               setSnackbarMsg('视频生成失败: ' + (data.error?.message || data.error || '未知错误'));
                setSnackbarOpen(true);
             }
             // 如果是 processing 或 pending，继续轮询
@@ -230,25 +248,29 @@ const HomePage = () => {
     return () => {
       if (pollTimerRef.current) clearInterval(pollTimerRef.current);
     };
-  }, [taskId]);
+  }, [taskId, currentModule]);
 
   // 切换标签页时重置模型
   useEffect(() => {
+    if (currentModule === 'sora' || currentModule === 'nano') {
+      return;
+    }
     if (activeTab === 'veo2') {
       setSelectedModel('veo2');
     } else if (activeTab === 'veo3') {
       setSelectedModel('veo3');
-    } else {
+    } else if (activeTab === 'veo3+') {
       setSelectedModel('veo3-pro');
     }
-  }, [activeTab]);
+  }, [activeTab, currentModule]);
 
   // 当切换模型时，清空图片，避免误传
   useEffect(() => {
     setImage1('');
     setImage2('');
     setImage3('');
-  }, [selectedModel]);
+    setNanoImages([]);
+  }, [selectedModel, currentModule]);
 
   const handleLogout = () => {
     localStorage.removeItem('access_token');
@@ -279,21 +301,41 @@ const HomePage = () => {
     let endpoint = '';
     let payload: any = {};
 
-    endpoint = '/api/generate/video';
-    
-    const images = [];
-    if (image1) images.push(image1);
-    if (image2) images.push(image2);
-    if (image3) images.push(image3);
+    if (currentModule === 'sora') {
+      endpoint = '/api/proxy/sora/generate';
+      payload = {
+        prompt,
+        aspectRatio,
+        duration,
+        size,
+        url: soraUrl || undefined
+      };
+    } else if (currentModule === 'nano') {
+      endpoint = '/api/proxy/nano/generate';
+      payload = {
+        model: nanoModel,
+        prompt,
+        aspect_ratio: aspectRatio,
+        image_size: nanoModel === 'nano-banana-2' ? nanoImageSize : undefined,
+        images: nanoImages.length > 0 ? nanoImages : undefined
+      };
+    } else {
+      endpoint = '/api/generate/video';
+      
+      const images = [];
+      if (image1) images.push(image1);
+      if (image2) images.push(image2);
+      if (image3) images.push(image3);
 
-    payload = {
-      prompt,
-      model: selectedModel,
-      aspect_ratio: aspectRatio,
-      enhance_prompt: true,
-      enable_upsample: true,
-      images: images.length > 0 ? images : undefined
-    };
+      payload = {
+        prompt,
+        model: selectedModel,
+        aspect_ratio: aspectRatio,
+        enhance_prompt: true,
+        enable_upsample: true,
+        images: images.length > 0 ? images : undefined
+      };
+    }
 
     try {
       const res = await fetch(`${API_BASE}${endpoint}`, {
@@ -311,9 +353,18 @@ const HomePage = () => {
       }
 
       const data = await res.json();
-      setTaskId(data.task_id);
-      setSnackbarMsg('任务已提交，正在生成中...');
-      setSnackbarOpen(true);
+      
+      if (currentModule === 'nano') {
+          // Nano 直接返回结果
+          setGenerationResult(data);
+          setIsGenerating(false);
+          setSnackbarMsg('图片生成成功！');
+          setSnackbarOpen(true);
+      } else {
+          setTaskId(data.task_id);
+          setSnackbarMsg('任务已提交，正在生成中...');
+          setSnackbarOpen(true);
+      }
 
     } catch (error: any) {
       setIsGenerating(false);
@@ -385,10 +436,58 @@ const HomePage = () => {
                 </Box>
                 <Box sx={{ flex: 1, overflowY: 'auto' }}>
                   <List component="nav" sx={{ py: 1 }}>
-                    {/* 左侧栏仅做展示，不联动选择与高亮；去掉 Fast Frames */}
-                    <ListItemButton sx={{ mb: 1, mx: 1, borderRadius: 1 }}>
-                      <ListItemIcon><MovieCreationIcon /></ListItemIcon>
+                    <ListItemButton 
+                      selected={currentModule === 'veo'}
+                      onClick={() => {
+                        setCurrentModule('veo');
+                        setActiveTab('veo2');
+                      }}
+                      sx={{ 
+                        mb: 1, mx: 1, borderRadius: 1,
+                        bgcolor: currentModule === 'veo' ? 'rgba(37, 99, 235, 0.08)' : 'transparent',
+                        color: currentModule === 'veo' ? 'primary.main' : 'inherit',
+                        '&.Mui-selected': { bgcolor: 'rgba(37, 99, 235, 0.12)' }
+                      }}
+                    >
+                      <ListItemIcon sx={{ color: currentModule === 'veo' ? 'primary.main' : 'inherit' }}>
+                        <MovieCreationIcon />
+                      </ListItemIcon>
                       <ListItemText primary="Veo2" secondary="适合通用视频生成" />
+                    </ListItemButton>
+
+                    <ListItemButton 
+                      selected={currentModule === 'sora'}
+                      onClick={() => {
+                        setCurrentModule('sora');
+                        setActiveTab('sora2');
+                      }}
+                      sx={{ 
+                        mb: 1, mx: 1, borderRadius: 1,
+                        bgcolor: currentModule === 'sora' ? 'rgba(16, 185, 129, 0.08)' : 'transparent',
+                        color: currentModule === 'sora' ? 'secondary.main' : 'inherit',
+                        '&.Mui-selected': { bgcolor: 'rgba(16, 185, 129, 0.12)' }
+                      }}
+                    >
+                      <ListItemIcon sx={{ color: currentModule === 'sora' ? 'secondary.main' : 'inherit' }}>
+                        <DashboardIcon />
+                      </ListItemIcon>
+                      <ListItemText primary="Sora" secondary="Sora2 无水印生成" />
+                    </ListItemButton>
+
+                    <ListItemButton 
+                      selected={currentModule === 'nano'}
+                      onClick={() => setCurrentModule('nano')}
+                      sx={{ 
+                        mb: 1, mx: 1, borderRadius: 1,
+                        bgcolor: currentModule === 'nano' ? 'rgba(245, 158, 11, 0.08)' : 'transparent',
+                        color: currentModule === 'nano' ? '#f59e0b' : 'inherit',
+                        '&.Mui-selected': { bgcolor: 'rgba(245, 158, 11, 0.12)' }
+                      }}
+                    >
+                      <ListItemIcon sx={{ color: currentModule === 'nano' ? '#f59e0b' : 'inherit' }}>
+                        <PhotoLibraryIcon />
+                      </ListItemIcon>
+                      <ListItemText primary="Nano Banana" secondary="AI 图片生成" />
                     </ListItemButton>
                   </List>
                 </Box>
@@ -397,107 +496,196 @@ const HomePage = () => {
             {/* 右侧：工作区（标题与分隔线全宽，结果区域从线下方开始） */}
             <Paper elevation={0} sx={{ ...cardBase, minHeight: 560, display: 'flex', flexDirection: 'column' }}>
                 <Box sx={{ display: 'flex', gap: 2, mb: 2 }}>
-                  {/* Veo2 Tab */}
-                  <Box 
-                    onClick={() => setActiveTab('veo2')}
-                    sx={{ 
-                      position: 'relative',
-                      bgcolor: activeTab === 'veo2' ? '#2563eb' : '#e2e8f0', 
-                      color: activeTab === 'veo2' ? 'white' : '#64748b', 
-                      pl: 3,
-                      pr: 3,
-                      py: 0.75, 
-                      width: 'fit-content', 
-                      cursor: 'pointer',
-                      clipPath: 'polygon(0% 0%, calc(100% - 12px) 0%, 100% 50%, calc(100% - 12px) 100%, 0% 100%, 12px 50%)',
-                      display: 'flex',
-                      alignItems: 'center',
-                      overflow: 'hidden',
-                      transition: 'all 0.3s',
-                      '&::after': activeTab === 'veo2' ? {
-                        content: '""',
-                        position: 'absolute',
-                        top: 0,
-                        bottom: 0,
-                        width: '6px',
-                        bgcolor: 'rgba(255, 255, 255, 0.4)',
-                        transform: 'skewX(-20deg)',
-                        animation: `${shine} 1.5s infinite linear`
-                      } : {}
-                    }}
-                  >
-                    <Typography variant="subtitle1" fontWeight={700}>
-                      veo2
-                    </Typography>
-                  </Box>
+                  {currentModule === 'veo' ? (
+                    <>
+                      {/* Veo2 Tab */}
+                      <Box 
+                        onClick={() => setActiveTab('veo2')}
+                        sx={{ 
+                          position: 'relative',
+                          bgcolor: activeTab === 'veo2' ? '#2563eb' : '#e2e8f0', 
+                          color: activeTab === 'veo2' ? 'white' : '#64748b', 
+                          pl: 3,
+                          pr: 3,
+                          py: 0.75, 
+                          width: 'fit-content', 
+                          cursor: 'pointer',
+                          clipPath: 'polygon(0% 0%, calc(100% - 12px) 0%, 100% 50%, calc(100% - 12px) 100%, 0% 100%, 12px 50%)',
+                          display: 'flex',
+                          alignItems: 'center',
+                          overflow: 'hidden',
+                          transition: 'all 0.3s',
+                          '&::after': activeTab === 'veo2' ? {
+                            content: '""',
+                            position: 'absolute',
+                            top: 0,
+                            bottom: 0,
+                            width: '6px',
+                            bgcolor: 'rgba(255, 255, 255, 0.4)',
+                            transform: 'skewX(-20deg)',
+                            animation: `${shine} 1.5s infinite linear`
+                          } : {}
+                        }}
+                      >
+                        <Typography variant="subtitle1" fontWeight={700}>
+                          veo2
+                        </Typography>
+                      </Box>
 
-                  {/* Veo3 Tab */}
-                  <Box 
-                    onClick={() => setActiveTab('veo3')}
-                    sx={{ 
-                      position: 'relative',
-                      bgcolor: activeTab === 'veo3' ? '#f59e0b' : '#e2e8f0', 
-                      color: activeTab === 'veo3' ? 'white' : '#64748b', 
-                      pl: 3,
-                      pr: 3,
-                      py: 0.75, 
-                      width: 'fit-content', 
-                      cursor: 'pointer',
-                      clipPath: 'polygon(0% 0%, calc(100% - 12px) 0%, 100% 50%, calc(100% - 12px) 100%, 0% 100%, 12px 50%)',
-                      display: 'flex',
-                      alignItems: 'center',
-                      overflow: 'hidden',
-                      transition: 'all 0.3s',
-                      '&::after': activeTab === 'veo3' ? {
-                        content: '""',
-                        position: 'absolute',
-                        top: 0,
-                        bottom: 0,
-                        width: '6px',
-                        bgcolor: 'rgba(255, 255, 255, 0.4)',
-                        transform: 'skewX(-20deg)',
-                        animation: `${shine} 1.5s infinite linear`
-                      } : {}
-                    }}
-                  >
-                    <Typography variant="subtitle1" fontWeight={700}>
-                      veo3
-                    </Typography>
-                  </Box>
+                      {/* Veo3 Tab */}
+                      <Box 
+                        onClick={() => setActiveTab('veo3')}
+                        sx={{ 
+                          position: 'relative',
+                          bgcolor: activeTab === 'veo3' ? '#f59e0b' : '#e2e8f0', 
+                          color: activeTab === 'veo3' ? 'white' : '#64748b', 
+                          pl: 3,
+                          pr: 3,
+                          py: 0.75, 
+                          width: 'fit-content', 
+                          cursor: 'pointer',
+                          clipPath: 'polygon(0% 0%, calc(100% - 12px) 0%, 100% 50%, calc(100% - 12px) 100%, 0% 100%, 12px 50%)',
+                          display: 'flex',
+                          alignItems: 'center',
+                          overflow: 'hidden',
+                          transition: 'all 0.3s',
+                          '&::after': activeTab === 'veo3' ? {
+                            content: '""',
+                            position: 'absolute',
+                            top: 0,
+                            bottom: 0,
+                            width: '6px',
+                            bgcolor: 'rgba(255, 255, 255, 0.4)',
+                            transform: 'skewX(-20deg)',
+                            animation: `${shine} 1.5s infinite linear`
+                          } : {}
+                        }}
+                      >
+                        <Typography variant="subtitle1" fontWeight={700}>
+                          veo3
+                        </Typography>
+                      </Box>
 
-                  {/* Veo3+ Tab */}
-                  <Box 
-                    onClick={() => setActiveTab('veo3+')}
-                    sx={{ 
-                      position: 'relative',
-                      bgcolor: activeTab === 'veo3+' ? '#10b981' : '#e2e8f0', 
-                      color: activeTab === 'veo3+' ? 'white' : '#64748b', 
-                      pl: 3,
-                      pr: 3,
-                      py: 0.75, 
-                      width: 'fit-content', 
-                      cursor: 'pointer',
-                      clipPath: 'polygon(0% 0%, calc(100% - 12px) 0%, 100% 50%, calc(100% - 12px) 100%, 0% 100%, 12px 50%)',
-                      display: 'flex',
-                      alignItems: 'center',
-                      overflow: 'hidden',
-                      transition: 'all 0.3s',
-                      '&::after': activeTab === 'veo3+' ? {
-                        content: '""',
-                        position: 'absolute',
-                        top: 0,
-                        bottom: 0,
-                        width: '6px',
-                        bgcolor: 'rgba(255, 255, 255, 0.4)',
-                        transform: 'skewX(-20deg)',
-                        animation: `${shine} 1.5s infinite linear`
-                      } : {}
-                    }}
-                  >
-                    <Typography variant="subtitle1" fontWeight={700}>
-                      veo3+
-                    </Typography>
-                  </Box>
+                      {/* Veo3+ Tab */}
+                      <Box 
+                        onClick={() => setActiveTab('veo3+')}
+                        sx={{ 
+                          position: 'relative',
+                          bgcolor: activeTab === 'veo3+' ? '#10b981' : '#e2e8f0', 
+                          color: activeTab === 'veo3+' ? 'white' : '#64748b', 
+                          pl: 3,
+                          pr: 3,
+                          py: 0.75, 
+                          width: 'fit-content', 
+                          cursor: 'pointer',
+                          clipPath: 'polygon(0% 0%, calc(100% - 12px) 0%, 100% 50%, calc(100% - 12px) 100%, 0% 100%, 12px 50%)',
+                          display: 'flex',
+                          alignItems: 'center',
+                          overflow: 'hidden',
+                          transition: 'all 0.3s',
+                          '&::after': activeTab === 'veo3+' ? {
+                            content: '""',
+                            position: 'absolute',
+                            top: 0,
+                            bottom: 0,
+                            width: '6px',
+                            bgcolor: 'rgba(255, 255, 255, 0.4)',
+                            transform: 'skewX(-20deg)',
+                            animation: `${shine} 1.5s infinite linear`
+                          } : {}
+                        }}
+                      >
+                        <Typography variant="subtitle1" fontWeight={700}>
+                          veo3+
+                        </Typography>
+                      </Box>
+                    </>
+                  ) : currentModule === 'sora' ? (
+                    /* Sora Tab */
+                    <Box 
+                      onClick={() => setActiveTab('sora2')}
+                      sx={{ 
+                        position: 'relative',
+                        bgcolor: '#10b981', 
+                        color: 'white', 
+                        pl: 3,
+                        pr: 6,
+                        py: 0.75, 
+                        width: 'fit-content', 
+                        cursor: 'pointer',
+                        clipPath: 'polygon(0% 0%, calc(100% - 12px) 0%, 100% 50%, calc(100% - 12px) 100%, 0% 100%, 12px 50%)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        overflow: 'hidden',
+                        transition: 'all 0.3s',
+                        '&::after': {
+                          content: '""',
+                          position: 'absolute',
+                          top: 0,
+                          bottom: 0,
+                          width: '6px',
+                          bgcolor: 'rgba(255, 255, 255, 0.4)',
+                          transform: 'skewX(-20deg)',
+                          animation: `${shine} 1.5s infinite linear`
+                        }
+                      }}
+                    >
+                      <Box sx={{ position: 'relative' }}>
+                        <Typography variant="subtitle1" fontWeight={700}>
+                          Sora2
+                        </Typography>
+                        <Box
+                          sx={{
+                            position: 'absolute',
+                            top: -4,
+                            left: '100%',
+                            ml: -0.5,
+                            fontSize: '10px',
+                            border: '1px solid white',
+                            borderRadius: '10px',
+                            px: 0.5,
+                            whiteSpace: 'nowrap',
+                            lineHeight: 1.2,
+                            transform: 'scale(0.9)',
+                            transformOrigin: 'left center'
+                          }}
+                        >
+                          无水印
+                        </Box>
+                      </Box>
+                    </Box>
+                  ) : (
+                    /* Nano Tab */
+                    <Box 
+                      sx={{ 
+                        position: 'relative',
+                        bgcolor: '#f59e0b', 
+                        color: 'white', 
+                        pl: 3,
+                        pr: 3,
+                        py: 0.75, 
+                        width: 'fit-content', 
+                        clipPath: 'polygon(0% 0%, calc(100% - 12px) 0%, 100% 50%, calc(100% - 12px) 100%, 0% 100%, 12px 50%)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        overflow: 'hidden',
+                        '&::after': {
+                          content: '""',
+                          position: 'absolute',
+                          top: 0,
+                          bottom: 0,
+                          width: '6px',
+                          bgcolor: 'rgba(255, 255, 255, 0.4)',
+                          transform: 'skewX(-20deg)',
+                          animation: `${shine} 1.5s infinite linear`
+                        }
+                      }}
+                    >
+                      <Typography variant="subtitle1" fontWeight={700}>
+                        Nano Banana
+                      </Typography>
+                    </Box>
+                  )}
                 </Box>
                 <Divider sx={{ mb: 2 }} />
                 <Box sx={{ display: 'flex', flexDirection: { xs: 'column', lg: 'row' }, gap: 3, flex: 1, mt: 1 }}>
@@ -508,7 +696,7 @@ const HomePage = () => {
                         label="Prompt (提示词)"
                         multiline
                         rows={4}
-                        placeholder="Describe the video you want to create..."
+                        placeholder="Describe the image you want to create..."
                         fullWidth
                         value={prompt}
                         onChange={(e) => setPrompt(e.target.value)}
@@ -516,103 +704,244 @@ const HomePage = () => {
                         sx={{ bgcolor: '#f8fafc' }}
                       />
 
-                      {/* 仅当模型支持图片输入时显示 (veo2-fast-frames 或 veo3 系列 或 veo3+ 系列) */}
-                      {(selectedModel === 'veo2-fast-frames' || selectedModel.startsWith('veo3')) && (
+                      {currentModule === 'veo' ? (
+                        /* Veo 表单字段 */
                         <>
-                          {/* Image 1: 适用于所有支持图片的模型 */}
+                          {/* 仅当模型支持图片输入时显示 (veo2-fast-frames 或 veo3 系列 或 veo3+ 系列) */}
+                          {(selectedModel === 'veo2-fast-frames' || selectedModel.startsWith('veo3')) && (
+                            <>
+                              {/* Image 1: 适用于所有支持图片的模型 */}
+                              <TextField
+                                label="Image 1 URL (首帧参考)"
+                                placeholder="https://example.com/image1.jpg"
+                                fullWidth
+                                value={image1}
+                                onChange={(e) => setImage1(e.target.value)}
+                                variant="outlined"
+                                size="small"
+                                InputProps={{
+                                  startAdornment: <ImageSearchIcon color="action" sx={{ mr: 1 }} />,
+                                }}
+                              />
+                              
+                              {/* Image 2: 适用于除 veo3-pro-frames (单图) 以外的模型 */}
+                              {selectedModel !== 'veo3-pro-frames' && (
+                                <TextField
+                                  label="Image 2 URL (尾帧参考 - 可选)"
+                                  placeholder="https://example.com/image2.jpg"
+                                  fullWidth
+                                  value={image2}
+                                  onChange={(e) => setImage2(e.target.value)}
+                                  variant="outlined"
+                                  size="small"
+                                  InputProps={{
+                                    startAdornment: <ImageSearchIcon color="action" sx={{ mr: 1 }} />,
+                                  }}
+                                />
+                              )}
+
+                              {/* Image 3: 仅适用于 veo3.1-components */}
+                              {selectedModel === 'veo3.1-components' && (
+                                <TextField
+                                  label="Image 3 URL (中间帧参考 - 可选)"
+                                  placeholder="https://example.com/image3.jpg"
+                                  fullWidth
+                                  value={image3}
+                                  onChange={(e) => setImage3(e.target.value)}
+                                  variant="outlined"
+                                  size="small"
+                                  InputProps={{
+                                    startAdornment: <ImageSearchIcon color="action" sx={{ mr: 1 }} />,
+                                  }}
+                                />
+                              )}
+
+                              <Typography variant="caption" color="text.secondary">
+                                {selectedModel === 'veo3-pro-frames' 
+                                  ? '* 仅支持上传一张图片作为参考。'
+                                  : selectedModel === 'veo3.1-components'
+                                  ? '* 支持上传最多三张图片作为参考。'
+                                  : '* 只传一张图片作为首帧参考，传两张则分别为首帧和尾帧。'}
+                              </Typography>
+                            </>
+                          )}
+
+                          <Box display="flex" gap={2}>
+                            <FormControl fullWidth size="small">
+                              <InputLabel>Aspect Ratio</InputLabel>
+                              <Select
+                                value={aspectRatio}
+                                label="Aspect Ratio"
+                                onChange={(e) => setAspectRatio(e.target.value)}
+                              >
+                                <MenuItem value="16:9">Cinema (16:9)</MenuItem>
+                                <MenuItem value="9:16">Portrait (9:16)</MenuItem>
+                              </Select>
+                            </FormControl>
+                          </Box>
+
+                          {/* 模型选择（右侧表单控制，不联动左侧） */}
+                          <FormControl fullWidth size="small">
+                            <InputLabel>Model</InputLabel>
+                            <Select
+                              value={selectedModel}
+                              label="Model"
+                              onChange={(e) => setSelectedModel(e.target.value)}
+                            >
+                              {activeTab === 'veo2' ? [
+                                <MenuItem key="veo2" value="veo2">Veo2</MenuItem>,
+                                <MenuItem key="veo2-fast-frames" value="veo2-fast-frames">Veo2 Fast Frames</MenuItem>
+                              ] : activeTab === 'veo3' ? [
+                                <MenuItem key="veo3" value="veo3">Veo3</MenuItem>,
+                                <MenuItem key="veo3-fast" value="veo3-fast">Veo3 Fast</MenuItem>,
+                                <MenuItem key="veo3-frames" value="veo3-frames">Veo3 Frames</MenuItem>
+                              ] : [
+                                <MenuItem key="veo3-pro" value="veo3-pro">Veo3 Pro (首尾帧)</MenuItem>,
+                                <MenuItem key="veo3-pro-frames" value="veo3-pro-frames">Veo3 Pro Frames (单图)</MenuItem>,
+                                <MenuItem key="veo3.1-components" value="veo3.1-components">Veo3.1 Components (三图)</MenuItem>,
+                                <MenuItem key="veo3.1" value="veo3.1">Veo3.1 (首尾帧)</MenuItem>,
+                                <MenuItem key="veo3.1-pro" value="veo3.1-pro">Veo3.1 Pro (首尾帧)</MenuItem>
+                              ]}
+                            </Select>
+                          </FormControl>
+                        </>
+                      ) : currentModule === 'sora' ? (
+                        /* Sora 表单字段 */
+                        <>
                           <TextField
-                            label="Image 1 URL (首帧参考)"
-                            placeholder="https://example.com/image1.jpg"
+                            label="Reference Image URL (参考图片 - 选填)"
+                            placeholder="https://example.com/image.jpg"
                             fullWidth
-                            value={image1}
-                            onChange={(e) => setImage1(e.target.value)}
+                            value={soraUrl}
+                            onChange={(e) => setSoraUrl(e.target.value)}
                             variant="outlined"
                             size="small"
                             InputProps={{
                               startAdornment: <ImageSearchIcon color="action" sx={{ mr: 1 }} />,
                             }}
                           />
+
+                          <Grid container spacing={2}>
+                            <Grid size={6}>
+                              <FormControl fullWidth size="small">
+                                <InputLabel>Aspect Ratio</InputLabel>
+                                <Select
+                                  value={aspectRatio}
+                                  label="Aspect Ratio"
+                                  onChange={(e) => setAspectRatio(e.target.value)}
+                                >
+                                  <MenuItem value="9:16">Portrait (9:16)</MenuItem>
+                                  <MenuItem value="16:9">Cinema (16:9)</MenuItem>
+                                </Select>
+                              </FormControl>
+                            </Grid>
+                            <Grid size={6}>
+                              <FormControl fullWidth size="small">
+                                <InputLabel>Duration (Seconds)</InputLabel>
+                                <Select
+                                  value={duration}
+                                  label="Duration (Seconds)"
+                                  onChange={(e) => setDuration(Number(e.target.value))}
+                                >
+                                  <MenuItem value={10}>10s</MenuItem>
+                                  <MenuItem value={15}>15s</MenuItem>
+                                </Select>
+                              </FormControl>
+                            </Grid>
+                          </Grid>
+
+                          <FormControl fullWidth size="small">
+                            <InputLabel>Size (Quality)</InputLabel>
+                            <Select
+                              value={size}
+                              label="Size (Quality)"
+                              onChange={(e) => setSize(e.target.value)}
+                            >
+                              <MenuItem value="small">Small (Standard)</MenuItem>
+                              <MenuItem value="large">Large (HD)</MenuItem>
+                            </Select>
+                          </FormControl>
+                        </>
+                      ) : (
+                        /* Nano Banana 表单字段 */
+                        <>
+                           <FormControl fullWidth size="small">
+                            <InputLabel>Model</InputLabel>
+                            <Select
+                              value={nanoModel}
+                              label="Model"
+                              onChange={(e) => setNanoModel(e.target.value)}
+                            >
+                              <MenuItem value="nano-banana-2">Nano Banana 2</MenuItem>
+                              <MenuItem value="nano-banana">Nano Banana</MenuItem>
+                            </Select>
+                          </FormControl>
+
+                          <FormControl fullWidth size="small">
+                            <InputLabel>Aspect Ratio</InputLabel>
+                            <Select
+                              value={aspectRatio}
+                              label="Aspect Ratio"
+                              onChange={(e) => setAspectRatio(e.target.value)}
+                            >
+                              <MenuItem value="16:9">16:9</MenuItem>
+                              <MenuItem value="9:16">9:16</MenuItem>
+                              <MenuItem value="1:1">1:1</MenuItem>
+                              <MenuItem value="4:3">4:3</MenuItem>
+                              <MenuItem value="3:4">3:4</MenuItem>
+                            </Select>
+                          </FormControl>
+
+                          {nanoModel === 'nano-banana-2' && (
+                             <FormControl fullWidth size="small">
+                              <InputLabel>Image Size</InputLabel>
+                              <Select
+                                value={nanoImageSize}
+                                label="Image Size"
+                                onChange={(e) => setNanoImageSize(e.target.value)}
+                              >
+                                <MenuItem value="1K">1K</MenuItem>
+                                <MenuItem value="2K">2K</MenuItem>
+                                <MenuItem value="4K">4K</MenuItem>
+                              </Select>
+                            </FormControl>
+                          )}
                           
-                          {/* Image 2: 适用于除 veo3-pro-frames (单图) 以外的模型 */}
-                          {selectedModel !== 'veo3-pro-frames' && (
-                            <TextField
-                              label="Image 2 URL (尾帧参考 - 可选)"
-                              placeholder="https://example.com/image2.jpg"
-                              fullWidth
-                              value={image2}
-                              onChange={(e) => setImage2(e.target.value)}
-                              variant="outlined"
-                              size="small"
-                              InputProps={{
-                                startAdornment: <ImageSearchIcon color="action" sx={{ mr: 1 }} />,
-                              }}
-                            />
-                          )}
-
-                          {/* Image 3: 仅适用于 veo3.1-components */}
-                          {selectedModel === 'veo3.1-components' && (
-                            <TextField
-                              label="Image 3 URL (中间帧参考 - 可选)"
-                              placeholder="https://example.com/image3.jpg"
-                              fullWidth
-                              value={image3}
-                              onChange={(e) => setImage3(e.target.value)}
-                              variant="outlined"
-                              size="small"
-                              InputProps={{
-                                startAdornment: <ImageSearchIcon color="action" sx={{ mr: 1 }} />,
-                              }}
-                            />
-                          )}
-
-                          <Typography variant="caption" color="text.secondary">
-                            {selectedModel === 'veo3-pro-frames' 
-                              ? '* 仅支持上传一张图片作为参考。'
-                              : selectedModel === 'veo3.1-components'
-                              ? '* 支持上传最多三张图片作为参考。'
-                              : '* 只传一张图片作为首帧参考，传两张则分别为首帧和尾帧。'}
-                          </Typography>
+                          <Box>
+                            <Box display="flex" gap={1} mb={1}>
+                                <TextField
+                                  label="Add Reference Image URL"
+                                  placeholder="https://example.com/image.jpg"
+                                  fullWidth
+                                  value={nanoInputImage}
+                                  onChange={(e) => setNanoInputImage(e.target.value)}
+                                  variant="outlined"
+                                  size="small"
+                                />
+                                <Button variant="outlined" onClick={() => {
+                                    if(nanoInputImage) {
+                                        setNanoImages([...nanoImages, nanoInputImage]);
+                                        setNanoInputImage('');
+                                    }
+                                }}>Add</Button>
+                            </Box>
+                            <Box display="flex" flexWrap="wrap" gap={1}>
+                                {nanoImages.map((img, idx) => (
+                                    <Chip 
+                                        key={idx} 
+                                        label={`Image ${idx + 1}`} 
+                                        onDelete={() => {
+                                            const newImages = [...nanoImages];
+                                            newImages.splice(idx, 1);
+                                            setNanoImages(newImages);
+                                        }} 
+                                        variant="outlined"
+                                    />
+                                ))}
+                            </Box>
+                          </Box>
                         </>
                       )}
-
-                      <Box display="flex" gap={2}>
-                        <FormControl fullWidth size="small">
-                          <InputLabel>Aspect Ratio</InputLabel>
-                          <Select
-                            value={aspectRatio}
-                            label="Aspect Ratio"
-                            onChange={(e) => setAspectRatio(e.target.value)}
-                          >
-                            <MenuItem value="16:9">Cinema (16:9)</MenuItem>
-                            <MenuItem value="9:16">Portrait (9:16)</MenuItem>
-                          </Select>
-                        </FormControl>
-                      </Box>
-
-                      {/* 模型选择（右侧表单控制，不联动左侧） */}
-                      <FormControl fullWidth size="small">
-                        <InputLabel>Model</InputLabel>
-                        <Select
-                          value={selectedModel}
-                          label="Model"
-                          onChange={(e) => setSelectedModel(e.target.value)}
-                        >
-                          {activeTab === 'veo2' ? [
-                            <MenuItem key="veo2" value="veo2">Veo2</MenuItem>,
-                            <MenuItem key="veo2-fast-frames" value="veo2-fast-frames">Veo2 Fast Frames</MenuItem>
-                          ] : activeTab === 'veo3' ? [
-                            <MenuItem key="veo3" value="veo3">Veo3</MenuItem>,
-                            <MenuItem key="veo3-fast" value="veo3-fast">Veo3 Fast</MenuItem>,
-                            <MenuItem key="veo3-frames" value="veo3-frames">Veo3 Frames</MenuItem>
-                          ] : [
-                            <MenuItem key="veo3-pro" value="veo3-pro">Veo3 Pro (首尾帧)</MenuItem>,
-                            <MenuItem key="veo3-pro-frames" value="veo3-pro-frames">Veo3 Pro Frames (单图)</MenuItem>,
-                            <MenuItem key="veo3.1-components" value="veo3.1-components">Veo3.1 Components (三图)</MenuItem>,
-                            <MenuItem key="veo3.1" value="veo3.1">Veo3.1 (首尾帧)</MenuItem>,
-                            <MenuItem key="veo3.1-pro" value="veo3.1-pro">Veo3.1 Pro (首尾帧)</MenuItem>
-                          ]}
-                        </Select>
-                      </FormControl>
 
                       <Box display="flex" justifyContent="space-between" alignItems="center" mt="auto" pb={2}>
                         <Button 
@@ -621,6 +950,9 @@ const HomePage = () => {
                             setPrompt('');
                             setImage1('');
                             setImage2('');
+                            setImage3('');
+                            setSoraUrl('');
+                            setNanoImages([]);
                           }}
                         >
                           Clear
@@ -637,7 +969,7 @@ const HomePage = () => {
                             boxShadow: '0 4px 12px rgba(37,99,235,0.3)'
                           }}
                         >
-                          {isGenerating ? 'Generating...' : 'Generate Video'}
+                          {isGenerating ? 'Generating...' : 'Generate'}
                         </Button>
                       </Box>
                     </Box>
@@ -648,12 +980,18 @@ const HomePage = () => {
                       {isGenerating ? (
                         <Box textAlign="center">
                           <CircularProgress sx={{ color: '#3b82f6', mb: 2 }} size={56} />
-                          <Typography variant="subtitle1">正在生成视频...</Typography>
+                          <Typography variant="subtitle1">正在生成...</Typography>
                           <Typography variant="caption" sx={{ opacity: 0.7 }}>这可能需要几分钟时间</Typography>
                         </Box>
                       ) : generationResult ? (
                         <Box width="100%" display="flex" flexDirection="column" alignItems="center" justifyContent="center" gap={2}>
-                          {generationResult.data?.video_url || generationResult.video_url ? (
+                          {generationResult.data && generationResult.data[0]?.url ? (
+                             <img 
+                                src={generationResult.data[0].url} 
+                                style={{ width: '100%', maxHeight: 340, borderRadius: 8, boxShadow: '0 0 16px rgba(0,0,0,0.4)', objectFit: 'contain' }} 
+                                alt="Generated"
+                             />
+                          ) : generationResult.data?.video_url || generationResult.video_url ? (
                             <video
                               controls
                               autoPlay

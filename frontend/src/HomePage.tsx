@@ -738,7 +738,7 @@ const HomePage = () => {
                                   {/* 上传框并行显示：首帧与尾帧 */}
                                   <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
                                     {/* 本地上传：首帧 Image 1 */}
-                                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, width: 180 }}>
+                                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, width: 120 }}>
                                       <Typography variant="caption" color="text.secondary">首帧参考（Image 1）</Typography>
                                       <Button
                                         variant="outlined"
@@ -774,9 +774,9 @@ const HomePage = () => {
                                             {uploading1 ? (
                                               <CircularProgress size={24} />
                                             ) : (
-                                              <AddPhotoAlternateIcon sx={{ fontSize: 40, mb: 1, color: '#cbd5e1' }} />
+                                              <AddPhotoAlternateIcon sx={{ fontSize: 32, mb: 0.5, color: '#cbd5e1' }} />
                                             )}
-                                            <Typography variant="caption" sx={{ color: '#64748b' }}>
+                                            <Typography variant="caption" sx={{ color: '#64748b', fontSize: '0.7rem' }}>
                                               {uploading1 ? '上传中...' : '上传图片'}
                                             </Typography>
                                           </>
@@ -802,7 +802,7 @@ const HomePage = () => {
                                     </Box>
 
                                     {/* 本地上传：尾帧 Image 2 */}
-                                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, width: 180 }}>
+                                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, width: 120 }}>
                                       <Typography variant="caption" color="text.secondary">尾帧参考（Image 2）</Typography>
                                       <Button
                                         variant="outlined"
@@ -838,9 +838,9 @@ const HomePage = () => {
                                             {uploading2 ? (
                                               <CircularProgress size={24} />
                                             ) : (
-                                              <AddPhotoAlternateIcon sx={{ fontSize: 40, mb: 1, color: '#cbd5e1' }} />
+                                              <AddPhotoAlternateIcon sx={{ fontSize: 32, mb: 0.5, color: '#cbd5e1' }} />
                                             )}
-                                            <Typography variant="caption" sx={{ color: '#64748b' }}>
+                                            <Typography variant="caption" sx={{ color: '#64748b', fontSize: '0.7rem' }}>
                                               {uploading2 ? '上传中...' : '上传图片'}
                                             </Typography>
                                           </>

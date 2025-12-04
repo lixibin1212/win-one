@@ -38,6 +38,7 @@ import ImageSearchIcon from '@mui/icons-material/ImageSearch';
 import LogoutIcon from '@mui/icons-material/Logout';
 import PlayCircleOutlineIcon from '@mui/icons-material/PlayCircleOutline';
 import PhotoLibraryIcon from '@mui/icons-material/PhotoLibrary';
+import AddPhotoAlternateIcon from '@mui/icons-material/AddPhotoAlternate';
 import { createClient } from '@supabase/supabase-js';
 
 const theme = createTheme({
@@ -739,8 +740,47 @@ const HomePage = () => {
                                     {/* 本地上传：首帧 Image 1 */}
                                     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
                                       <Typography variant="caption" color="text.secondary">首帧参考（Image 1）</Typography>
-                                      <Button variant="outlined" component="label" disabled={uploading1} sx={{ height: 56 }}>
-                                        {uploading1 ? '上传中...' : '上传图片'}
+                                      <Button
+                                        variant="outlined"
+                                        component="label"
+                                        disabled={uploading1}
+                                        sx={{
+                                          width: '100%',
+                                          aspectRatio: '1/1',
+                                          display: 'flex',
+                                          flexDirection: 'column',
+                                          alignItems: 'center',
+                                          justifyContent: 'center',
+                                          border: '2px dashed #e2e8f0',
+                                          borderRadius: 2,
+                                          color: 'text.secondary',
+                                          overflow: 'hidden',
+                                          p: 0,
+                                          '&:hover': {
+                                            border: '2px dashed #2563eb',
+                                            bgcolor: 'rgba(37, 99, 235, 0.04)'
+                                          }
+                                        }}
+                                      >
+                                        {image1 ? (
+                                          <Box
+                                            component="img"
+                                            src={image1}
+                                            alt="首帧预览"
+                                            sx={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                                          />
+                                        ) : (
+                                          <>
+                                            {uploading1 ? (
+                                              <CircularProgress size={24} />
+                                            ) : (
+                                              <AddPhotoAlternateIcon sx={{ fontSize: 40, mb: 1, color: '#cbd5e1' }} />
+                                            )}
+                                            <Typography variant="caption" sx={{ color: '#64748b' }}>
+                                              {uploading1 ? '上传中...' : '上传图片'}
+                                            </Typography>
+                                          </>
+                                        )}
                                         <input type="file" accept="image/*" hidden onChange={async (e) => {
                                           const file = e.target.files?.[0];
                                           if (!file) return;
@@ -759,16 +799,52 @@ const HomePage = () => {
                                           }
                                         }} />
                                       </Button>
-                                      {image1 && (
-                                        <Typography variant="caption" color="success.main" sx={{ wordBreak: 'break-all' }}>已上传</Typography>
-                                      )}
                                     </Box>
 
                                     {/* 本地上传：尾帧 Image 2 */}
                                     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
                                       <Typography variant="caption" color="text.secondary">尾帧参考（Image 2）</Typography>
-                                      <Button variant="outlined" component="label" disabled={uploading2} sx={{ height: 56 }}>
-                                        {uploading2 ? '上传中...' : '上传图片'}
+                                      <Button
+                                        variant="outlined"
+                                        component="label"
+                                        disabled={uploading2}
+                                        sx={{
+                                          width: '100%',
+                                          aspectRatio: '1/1',
+                                          display: 'flex',
+                                          flexDirection: 'column',
+                                          alignItems: 'center',
+                                          justifyContent: 'center',
+                                          border: '2px dashed #e2e8f0',
+                                          borderRadius: 2,
+                                          color: 'text.secondary',
+                                          overflow: 'hidden',
+                                          p: 0,
+                                          '&:hover': {
+                                            border: '2px dashed #2563eb',
+                                            bgcolor: 'rgba(37, 99, 235, 0.04)'
+                                          }
+                                        }}
+                                      >
+                                        {image2 ? (
+                                          <Box
+                                            component="img"
+                                            src={image2}
+                                            alt="尾帧预览"
+                                            sx={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                                          />
+                                        ) : (
+                                          <>
+                                            {uploading2 ? (
+                                              <CircularProgress size={24} />
+                                            ) : (
+                                              <AddPhotoAlternateIcon sx={{ fontSize: 40, mb: 1, color: '#cbd5e1' }} />
+                                            )}
+                                            <Typography variant="caption" sx={{ color: '#64748b' }}>
+                                              {uploading2 ? '上传中...' : '上传图片'}
+                                            </Typography>
+                                          </>
+                                        )}
                                         <input type="file" accept="image/*" hidden onChange={async (e) => {
                                           const file = e.target.files?.[0];
                                           if (!file) return;
@@ -787,9 +863,6 @@ const HomePage = () => {
                                           }
                                         }} />
                                       </Button>
-                                      {image2 && (
-                                        <Typography variant="caption" color="success.main" sx={{ wordBreak: 'break-all' }}>已上传</Typography>
-                                      )}
                                     </Box>
                                   </Box>
                                 </>

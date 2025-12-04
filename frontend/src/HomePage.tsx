@@ -736,9 +736,9 @@ const HomePage = () => {
                               {selectedModel === 'veo2-fast-frames' ? (
                                 <>
                                   {/* 上传框并行显示：首帧与尾帧 */}
-                                  <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' }, gap: 2 }}>
+                                  <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
                                     {/* 本地上传：首帧 Image 1 */}
-                                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, width: 180 }}>
                                       <Typography variant="caption" color="text.secondary">首帧参考（Image 1）</Typography>
                                       <Button
                                         variant="outlined"
@@ -802,7 +802,7 @@ const HomePage = () => {
                                     </Box>
 
                                     {/* 本地上传：尾帧 Image 2 */}
-                                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, width: 180 }}>
                                       <Typography variant="caption" color="text.secondary">尾帧参考（Image 2）</Typography>
                                       <Button
                                         variant="outlined"

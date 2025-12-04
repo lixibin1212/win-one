@@ -38,6 +38,8 @@ import ImageSearchIcon from '@mui/icons-material/ImageSearch';
 import LogoutIcon from '@mui/icons-material/Logout';
 import PlayCircleOutlineIcon from '@mui/icons-material/PlayCircleOutline';
 import PhotoLibraryIcon from '@mui/icons-material/PhotoLibrary';
+import { createClient } from '@supabase/supabase-js';
+import { v4 as uuidv4 } from 'uuid';
 
 const theme = createTheme({
   palette: {
@@ -81,6 +83,11 @@ const cardBase = {
 };
 
 const API_BASE = process.env.REACT_APP_API_BASE || 'http://localhost:8000';
+// Supabase 配置
+const SUPABASE_URL = 'https://vvrexwgovtnjdcdlwciw.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZ2cmV4d2dvdnRuamRjZGx3Y2l3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjM1NTcyODUsImV4cCI6MjA3OTEzMzI4NX0.RqJXqlwnQggkeMAhd6FRcb4ofxZ3xqDn-KYQ-TScf1s';
+const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const SUPABASE_BUCKET = 'uploads';
 
 // 轮播图组件
 const Carousel = () => {
@@ -171,6 +178,8 @@ const HomePage = () => {
   const [image1, setImage1] = useState('');
   const [image2, setImage2] = useState('');
   const [image3, setImage3] = useState('');
+  const [uploading1, setUploading1] = useState(false);
+  const [uploading2, setUploading2] = useState(false);
   const [soraUrl, setSoraUrl] = useState(''); // Sora 专用 URL
   const [isGenerating, setIsGenerating] = useState(false);
   const [taskId, setTaskId] = useState<string | null>(null);
@@ -373,6 +382,19 @@ const HomePage = () => {
     }
   };
 
+  // 上传到 Supabase 并返回公开 URL
+  const uploadToSupabase = async (file: File): Promise<string> => {
+    const ext = file.name.split('.').pop() || 'jpg';
+    const path = `veo/${uuidv4()}.${ext}`;
+    const { data, error } = await supabase.storage.from(SUPABASE_BUCKET).upload(path, file, {
+      cacheControl: '3600',
+      upsert: false,
+    });
+    if (error) throw new Error(`上传失败：${error.message}`);
+    const { data: pub } = supabase.storage.from(SUPABASE_BUCKET).getPublicUrl(data.path);
+    return pub.publicUrl;
+  };
+
   if (loading) {
     return (
       <ThemeProvider theme={theme}>
@@ -452,7 +474,7 @@ const HomePage = () => {
                       <ListItemIcon sx={{ color: currentModule === 'veo' ? 'primary.main' : 'inherit' }}>
                         <MovieCreationIcon />
                       </ListItemIcon>
-                      <ListItemText primary="Veo2" secondary="适合通用视频生成" />
+                      <ListItemText primary="Veo" secondary="适合通用视频生成" />
                     </ListItemButton>
 
                     <ListItemButton 
@@ -710,34 +732,91 @@ const HomePage = () => {
                           {/* 仅当模型支持图片输入时显示 (veo2-fast-frames 或 veo3 系列 或 veo3+ 系列) */}
                           {(selectedModel === 'veo2-fast-frames' || selectedModel.startsWith('veo3')) && (
                             <>
-                              {/* Image 1: 适用于所有支持图片的模型 */}
-                              <TextField
-                                label="Image 1 URL (首帧参考)"
-                                placeholder="https://example.com/image1.jpg"
-                                fullWidth
-                                value={image1}
-                                onChange={(e) => setImage1(e.target.value)}
-                                variant="outlined"
-                                size="small"
-                                InputProps={{
-                                  startAdornment: <ImageSearchIcon color="action" sx={{ mr: 1 }} />,
-                                }}
-                              />
-                              
-                              {/* Image 2: 适用于除 veo3-pro-frames (单图) 以外的模型 */}
-                              {selectedModel !== 'veo3-pro-frames' && (
-                                <TextField
-                                  label="Image 2 URL (尾帧参考 - 可选)"
-                                  placeholder="https://example.com/image2.jpg"
-                                  fullWidth
-                                  value={image2}
-                                  onChange={(e) => setImage2(e.target.value)}
-                                  variant="outlined"
-                                  size="small"
-                                  InputProps={{
-                                    startAdornment: <ImageSearchIcon color="action" sx={{ mr: 1 }} />,
-                                  }}
-                                />
+                              {selectedModel === 'veo2-fast-frames' ? (
+                                <>
+                                  {/* 本地上传：首帧 Image 1 */}
+                                  <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                                    <Typography variant="caption" color="text.secondary">首帧参考（Image 1）</Typography>
+                                    <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
+                                      <Button variant="outlined" component="label" disabled={uploading1}>
+                                        {uploading1 ? '上传中...' : '上传图片'}
+                                        <input type="file" accept="image/*" hidden onChange={async (e) => {
+                                          const file = e.target.files?.[0];
+                                          if (!file) return;
+                                          setUploading1(true);
+                                          try {
+                                            const url = await uploadToSupabase(file);
+                                            setImage1(url);
+                                            setSnackbarMsg('首帧图片上传成功');
+                                            setSnackbarOpen(true);
+                                          } catch (err: any) {
+                                            setSnackbarMsg(err.message || '首帧上传失败');
+                                            setSnackbarOpen(true);
+                                          } finally {
+                                            setUploading1(false);
+                                            e.target.value = '';
+                                          }
+                                        }} />
+                                      </Button>
+                                      <TextField fullWidth size="small" placeholder="上传后自动填入公开链接" value={image1} onChange={(e) => setImage1(e.target.value)} />
+                                    </Box>
+                                  </Box>
+
+                                  {/* 本地上传：尾帧 Image 2 */}
+                                  <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, mt: 2 }}>
+                                    <Typography variant="caption" color="text.secondary">尾帧参考（Image 2）</Typography>
+                                    <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
+                                      <Button variant="outlined" component="label" disabled={uploading2}>
+                                        {uploading2 ? '上传中...' : '上传图片'}
+                                        <input type="file" accept="image/*" hidden onChange={async (e) => {
+                                          const file = e.target.files?.[0];
+                                          if (!file) return;
+                                          setUploading2(true);
+                                          try {
+                                            const url = await uploadToSupabase(file);
+                                            setImage2(url);
+                                            setSnackbarMsg('尾帧图片上传成功');
+                                            setSnackbarOpen(true);
+                                          } catch (err: any) {
+                                            setSnackbarMsg(err.message || '尾帧上传失败');
+                                            setSnackbarOpen(true);
+                                          } finally {
+                                            setUploading2(false);
+                                            e.target.value = '';
+                                          }
+                                        }} />
+                                      </Button>
+                                      <TextField fullWidth size="small" placeholder="上传后自动填入公开链接" value={image2} onChange={(e) => setImage2(e.target.value)} />
+                                    </Box>
+                                  </Box>
+                                </>
+                              ) : (
+                                <>
+                                  {/* URL 输入模式：Image 1 */}
+                                  <TextField
+                                    label="Image 1 URL (首帧参考)"
+                                    placeholder="https://example.com/image1.jpg"
+                                    fullWidth
+                                    value={image1}
+                                    onChange={(e) => setImage1(e.target.value)}
+                                    variant="outlined"
+                                    size="small"
+                                    InputProps={{ startAdornment: <ImageSearchIcon color="action" sx={{ mr: 1 }} /> }}
+                                  />
+                                  {/* URL 输入模式：Image 2（除单图外） */}
+                                  {selectedModel !== 'veo3-pro-frames' && (
+                                    <TextField
+                                      label="Image 2 URL (尾帧参考 - 可选)"
+                                      placeholder="https://example.com/image2.jpg"
+                                      fullWidth
+                                      value={image2}
+                                      onChange={(e) => setImage2(e.target.value)}
+                                      variant="outlined"
+                                      size="small"
+                                      InputProps={{ startAdornment: <ImageSearchIcon color="action" sx={{ mr: 1 }} /> }}
+                                    />
+                                  )}
+                                </>
                               )}
 
                               {/* Image 3: 仅适用于 veo3.1-components */}
@@ -761,7 +840,7 @@ const HomePage = () => {
                                   ? '* 仅支持上传一张图片作为参考。'
                                   : selectedModel === 'veo3.1-components'
                                   ? '* 支持上传最多三张图片作为参考。'
-                                  : '* 只传一张图片作为首帧参考，传两张则分别为首帧和尾帧。'}
+                                  : '* 只传一张图片作为首帧参考，传两张则分别为首帧和尾帧。（veo2-fast-frames 支持本地上传）'}
                               </Typography>
                             </>
                           )}

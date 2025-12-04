@@ -39,7 +39,6 @@ import LogoutIcon from '@mui/icons-material/Logout';
 import PlayCircleOutlineIcon from '@mui/icons-material/PlayCircleOutline';
 import PhotoLibraryIcon from '@mui/icons-material/PhotoLibrary';
 import { createClient } from '@supabase/supabase-js';
-import { v4 as uuidv4 } from 'uuid';
 
 const theme = createTheme({
   palette: {
@@ -385,7 +384,8 @@ const HomePage = () => {
   // 上传到 Supabase 并返回公开 URL
   const uploadToSupabase = async (file: File): Promise<string> => {
     const ext = file.name.split('.').pop() || 'jpg';
-    const path = `veo/${uuidv4()}.${ext}`;
+    const id = (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : Math.random().toString(36).slice(2);
+    const path = `veo/${id}.${ext}`;
     const { data, error } = await supabase.storage.from(SUPABASE_BUCKET).upload(path, file, {
       cacheControl: '3600',
       upsert: false,

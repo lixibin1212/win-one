@@ -713,7 +713,7 @@ const HomePage = () => {
                 <Divider sx={{ mb: 2 }} />
                 <Box sx={{ display: 'flex', flexDirection: { xs: 'column', lg: 'row' }, gap: 3, flex: 1, mt: 1 }}>
                   {/* 左侧配置区域 */}
-                  <Box sx={{ flex: { xs: '1 1 auto', lg: '0 0 30%' }, display: 'flex', flexDirection: 'column', minHeight: 440 }}>
+                  <Box sx={{ flex: { xs: '1 1 auto', lg: '0 0 35%' }, display: 'flex', flexDirection: 'column', minHeight: 440 }}>
                     <Box component="form" noValidate autoComplete="off" display="flex" flexDirection="column" gap={3} sx={{ flex: 1 }}>
                       <TextField
                         label="Prompt (提示词)"
@@ -1130,7 +1130,7 @@ const HomePage = () => {
                     </Box>
                   </Box>
                   {/* 右侧结果区域：保证不高于左侧表单底部 */}
-                  <Box sx={{ flex: { xs: '1 1 auto', lg: '0 0 70%' }, display: 'flex', flexDirection: 'column', mr: { xs: 0, lg: 1.5 }, minHeight: 440 }}>
+                  <Box sx={{ flex: { xs: '1 1 auto', lg: '0 0 65%' }, display: 'flex', flexDirection: 'column', mr: { xs: 0, lg: 1.5 }, minHeight: 440 }}>
                     <Box sx={{ flex: 1, bgcolor: '#0f172a', color: 'white', borderRadius: 2, p: 2, display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative', mr: { xs: 0, lg: 2 }, mb: 2 }}>
                       {isGenerating ? (
                         <Box textAlign="center">

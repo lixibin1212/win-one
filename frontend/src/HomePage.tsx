@@ -734,11 +734,12 @@ const HomePage = () => {
                             <>
                               {selectedModel === 'veo2-fast-frames' ? (
                                 <>
-                                  {/* 本地上传：首帧 Image 1 */}
-                                  <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-                                    <Typography variant="caption" color="text.secondary">首帧参考（Image 1）</Typography>
-                                    <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
-                                      <Button variant="outlined" component="label" disabled={uploading1}>
+                                  {/* 上传框并行显示：首帧与尾帧 */}
+                                  <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' }, gap: 2 }}>
+                                    {/* 本地上传：首帧 Image 1 */}
+                                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                                      <Typography variant="caption" color="text.secondary">首帧参考（Image 1）</Typography>
+                                      <Button variant="outlined" component="label" disabled={uploading1} sx={{ height: 56 }}>
                                         {uploading1 ? '上传中...' : '上传图片'}
                                         <input type="file" accept="image/*" hidden onChange={async (e) => {
                                           const file = e.target.files?.[0];
@@ -758,15 +759,15 @@ const HomePage = () => {
                                           }
                                         }} />
                                       </Button>
-                                      <TextField fullWidth size="small" placeholder="上传后自动填入公开链接" value={image1} onChange={(e) => setImage1(e.target.value)} />
+                                      {image1 && (
+                                        <Typography variant="caption" color="success.main" sx={{ wordBreak: 'break-all' }}>已上传</Typography>
+                                      )}
                                     </Box>
-                                  </Box>
 
-                                  {/* 本地上传：尾帧 Image 2 */}
-                                  <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, mt: 2 }}>
-                                    <Typography variant="caption" color="text.secondary">尾帧参考（Image 2）</Typography>
-                                    <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
-                                      <Button variant="outlined" component="label" disabled={uploading2}>
+                                    {/* 本地上传：尾帧 Image 2 */}
+                                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                                      <Typography variant="caption" color="text.secondary">尾帧参考（Image 2）</Typography>
+                                      <Button variant="outlined" component="label" disabled={uploading2} sx={{ height: 56 }}>
                                         {uploading2 ? '上传中...' : '上传图片'}
                                         <input type="file" accept="image/*" hidden onChange={async (e) => {
                                           const file = e.target.files?.[0];
@@ -786,7 +787,9 @@ const HomePage = () => {
                                           }
                                         }} />
                                       </Button>
-                                      <TextField fullWidth size="small" placeholder="上传后自动填入公开链接" value={image2} onChange={(e) => setImage2(e.target.value)} />
+                                      {image2 && (
+                                        <Typography variant="caption" color="success.main" sx={{ wordBreak: 'break-all' }}>已上传</Typography>
+                                      )}
                                     </Box>
                                   </Box>
                                 </>

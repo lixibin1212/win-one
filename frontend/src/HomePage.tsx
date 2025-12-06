@@ -39,6 +39,7 @@ import LogoutIcon from '@mui/icons-material/Logout';
 import PlayCircleOutlineIcon from '@mui/icons-material/PlayCircleOutline';
 import PhotoLibraryIcon from '@mui/icons-material/PhotoLibrary';
 import AddPhotoAlternateIcon from '@mui/icons-material/AddPhotoAlternate';
+import CloseIcon from '@mui/icons-material/Close';
 import { createClient } from '@supabase/supabase-js';
 
 const theme = createTheme({
@@ -87,7 +88,7 @@ const API_BASE = process.env.REACT_APP_API_BASE || 'http://localhost:8000';
 const SUPABASE_URL = 'https://vvrexwgovtnjdcdlwciw.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZ2cmV4d2dvdnRuamRjZGx3Y2l3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjM1NTcyODUsImV4cCI6MjA3OTEzMzI4NX0.RqJXqlwnQggkeMAhd6FRcb4ofxZ3xqDn-KYQ-TScf1s';
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-const SUPABASE_BUCKET = 'uploads';
+const SUPABASE_BUCKET = 'Vwin';
 
 // 轮播图组件
 const Carousel = () => {
@@ -168,7 +169,6 @@ const HomePage = () => {
   const [nanoModel, setNanoModel] = useState('nano-banana-2');
   const [nanoImageSize, setNanoImageSize] = useState('1K');
   const [nanoImages, setNanoImages] = useState<string[]>([]);
-  const [nanoInputImage, setNanoInputImage] = useState('');
 
   // 表单状态
   const [prompt, setPrompt] = useState('');
@@ -180,6 +180,9 @@ const HomePage = () => {
   const [image3, setImage3] = useState('');
   const [uploading1, setUploading1] = useState(false);
   const [uploading2, setUploading2] = useState(false);
+  const [uploading3, setUploading3] = useState(false);
+  const [uploadingNano, setUploadingNano] = useState(false);
+  const [uploadingSora, setUploadingSora] = useState(false);
   const [soraUrl, setSoraUrl] = useState(''); // Sora 专用 URL
   const [isGenerating, setIsGenerating] = useState(false);
   const [taskId, setTaskId] = useState<string | null>(null);
@@ -278,7 +281,7 @@ const HomePage = () => {
     setImage1('');
     setImage2('');
     setImage3('');
-    setNanoImages([]);
+    // setNanoImages([]); // 切换模型时不清除 Nano 图片
   }, [selectedModel, currentModule]);
 
   const handleLogout = () => {
@@ -386,7 +389,7 @@ const HomePage = () => {
   const uploadToSupabase = async (file: File): Promise<string> => {
     const ext = file.name.split('.').pop() || 'jpg';
     const id = (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : Math.random().toString(36).slice(2);
-    const path = `veo/${id}.${ext}`;
+    const path = `op/${id}.${ext}`;
     const { data, error } = await supabase.storage.from(SUPABASE_BUCKET).upload(path, file, {
       cacheControl: '3600',
       upsert: false,
@@ -733,13 +736,11 @@ const HomePage = () => {
                           {/* 仅当模型支持图片输入时显示 (veo2-fast-frames 或 veo3 系列 或 veo3+ 系列) */}
                           {(selectedModel === 'veo2-fast-frames' || selectedModel.startsWith('veo3')) && (
                             <>
-                              {selectedModel === 'veo2-fast-frames' ? (
-                                <>
-                                  {/* 上传框并行显示：首帧与尾帧 */}
-                                  <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
+                              {/* 上传框并行显示：首帧、尾帧、中间帧 */}
+                                  <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
                                     {/* 本地上传：首帧 Image 1 */}
-                                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, width: 120 }}>
-                                      <Typography variant="caption" color="text.secondary">首帧参考（Image 1）</Typography>
+                                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, width: 110 }}>
+                                      <Typography variant="caption" color="text.secondary">参考图1</Typography>
                                       <Button
                                         variant="outlined"
                                         component="label"
@@ -802,114 +803,137 @@ const HomePage = () => {
                                     </Box>
 
                                     {/* 本地上传：尾帧 Image 2 */}
-                                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, width: 120 }}>
-                                      <Typography variant="caption" color="text.secondary">尾帧参考（Image 2）</Typography>
-                                      <Button
-                                        variant="outlined"
-                                        component="label"
-                                        disabled={uploading2}
-                                        sx={{
-                                          width: '100%',
-                                          aspectRatio: '1/1',
-                                          display: 'flex',
-                                          flexDirection: 'column',
-                                          alignItems: 'center',
-                                          justifyContent: 'center',
-                                          border: '2px dashed #e2e8f0',
-                                          borderRadius: 2,
-                                          color: 'text.secondary',
-                                          overflow: 'hidden',
-                                          p: 0,
-                                          '&:hover': {
-                                            border: '2px dashed #2563eb',
-                                            bgcolor: 'rgba(37, 99, 235, 0.04)'
-                                          }
-                                        }}
-                                      >
-                                        {image2 ? (
-                                          <Box
-                                            component="img"
-                                            src={image2}
-                                            alt="尾帧预览"
-                                            sx={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                                          />
-                                        ) : (
-                                          <>
-                                            {uploading2 ? (
-                                              <CircularProgress size={24} />
-                                            ) : (
-                                              <AddPhotoAlternateIcon sx={{ fontSize: 32, mb: 0.5, color: '#cbd5e1' }} />
-                                            )}
-                                            <Typography variant="caption" sx={{ color: '#64748b', fontSize: '0.7rem' }}>
-                                              {uploading2 ? '上传中...' : '上传图片'}
-                                            </Typography>
-                                          </>
-                                        )}
-                                        <input type="file" accept="image/*" hidden onChange={async (e) => {
-                                          const file = e.target.files?.[0];
-                                          if (!file) return;
-                                          setUploading2(true);
-                                          try {
-                                            const url = await uploadToSupabase(file);
-                                            setImage2(url);
-                                            setSnackbarMsg('尾帧图片上传成功');
-                                            setSnackbarOpen(true);
-                                          } catch (err: any) {
-                                            setSnackbarMsg(err.message || '尾帧上传失败');
-                                            setSnackbarOpen(true);
-                                          } finally {
-                                            setUploading2(false);
-                                            e.target.value = '';
-                                          }
-                                        }} />
-                                      </Button>
-                                    </Box>
-                                  </Box>
-                                </>
-                              ) : (
-                                <>
-                                  {/* URL 输入模式：Image 1 */}
-                                  <TextField
-                                    label="Image 1 URL (首帧参考)"
-                                    placeholder="https://example.com/image1.jpg"
-                                    fullWidth
-                                    value={image1}
-                                    onChange={(e) => setImage1(e.target.value)}
-                                    variant="outlined"
-                                    size="small"
-                                    InputProps={{ startAdornment: <ImageSearchIcon color="action" sx={{ mr: 1 }} /> }}
-                                  />
-                                  {/* URL 输入模式：Image 2（除单图外） */}
-                                  {selectedModel !== 'veo3-pro-frames' && (
-                                    <TextField
-                                      label="Image 2 URL (尾帧参考 - 可选)"
-                                      placeholder="https://example.com/image2.jpg"
-                                      fullWidth
-                                      value={image2}
-                                      onChange={(e) => setImage2(e.target.value)}
-                                      variant="outlined"
-                                      size="small"
-                                      InputProps={{ startAdornment: <ImageSearchIcon color="action" sx={{ mr: 1 }} /> }}
-                                    />
-                                  )}
-                                </>
-                              )}
+                                    {selectedModel !== 'veo3-pro-frames' && (
+                                      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, width: 110 }}>
+                                        <Typography variant="caption" color="text.secondary">参考图2</Typography>
+                                        <Button
+                                          variant="outlined"
+                                          component="label"
+                                          disabled={uploading2}
+                                          sx={{
+                                            width: '100%',
+                                            aspectRatio: '1/1',
+                                            display: 'flex',
+                                            flexDirection: 'column',
+                                            alignItems: 'center',
+                                            justifyContent: 'center',
+                                            border: '2px dashed #e2e8f0',
+                                            borderRadius: 2,
+                                            color: 'text.secondary',
+                                            overflow: 'hidden',
+                                            p: 0,
+                                            '&:hover': {
+                                              border: '2px dashed #2563eb',
+                                              bgcolor: 'rgba(37, 99, 235, 0.04)'
+                                            }
+                                          }}
+                                        >
+                                          {image2 ? (
+                                            <Box
+                                              component="img"
+                                              src={image2}
+                                              alt="尾帧预览"
+                                              sx={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                                            />
+                                          ) : (
+                                            <>
+                                              {uploading2 ? (
+                                                <CircularProgress size={24} />
+                                              ) : (
+                                                <AddPhotoAlternateIcon sx={{ fontSize: 32, mb: 0.5, color: '#cbd5e1' }} />
+                                              )}
+                                              <Typography variant="caption" sx={{ color: '#64748b', fontSize: '0.7rem' }}>
+                                                {uploading2 ? '上传中...' : '上传图片'}
+                                              </Typography>
+                                            </>
+                                          )}
+                                          <input type="file" accept="image/*" hidden onChange={async (e) => {
+                                            const file = e.target.files?.[0];
+                                            if (!file) return;
+                                            setUploading2(true);
+                                            try {
+                                              const url = await uploadToSupabase(file);
+                                              setImage2(url);
+                                              setSnackbarMsg('尾帧图片上传成功');
+                                              setSnackbarOpen(true);
+                                            } catch (err: any) {
+                                              setSnackbarMsg(err.message || '尾帧上传失败');
+                                              setSnackbarOpen(true);
+                                            } finally {
+                                              setUploading2(false);
+                                              e.target.value = '';
+                                            }
+                                          }} />
+                                        </Button>
+                                      </Box>
+                                    )}
 
-                              {/* Image 3: 仅适用于 veo3.1-components */}
-                              {selectedModel === 'veo3.1-components' && (
-                                <TextField
-                                  label="Image 3 URL (中间帧参考 - 可选)"
-                                  placeholder="https://example.com/image3.jpg"
-                                  fullWidth
-                                  value={image3}
-                                  onChange={(e) => setImage3(e.target.value)}
-                                  variant="outlined"
-                                  size="small"
-                                  InputProps={{
-                                    startAdornment: <ImageSearchIcon color="action" sx={{ mr: 1 }} />,
-                                  }}
-                                />
-                              )}
+                                    {/* 本地上传：中间帧 Image 3 */}
+                                    {selectedModel === 'veo3.1-components' && (
+                                      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, width: 110 }}>
+                                        <Typography variant="caption" color="text.secondary">参考图3</Typography>
+                                        <Button
+                                          variant="outlined"
+                                          component="label"
+                                          disabled={uploading3}
+                                          sx={{
+                                            width: '100%',
+                                            aspectRatio: '1/1',
+                                            display: 'flex',
+                                            flexDirection: 'column',
+                                            alignItems: 'center',
+                                            justifyContent: 'center',
+                                            border: '2px dashed #e2e8f0',
+                                            borderRadius: 2,
+                                            color: 'text.secondary',
+                                            overflow: 'hidden',
+                                            p: 0,
+                                            '&:hover': {
+                                              border: '2px dashed #2563eb',
+                                              bgcolor: 'rgba(37, 99, 235, 0.04)'
+                                            }
+                                          }}
+                                        >
+                                          {image3 ? (
+                                            <Box
+                                              component="img"
+                                              src={image3}
+                                              alt="中间帧预览"
+                                              sx={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                                            />
+                                          ) : (
+                                            <>
+                                              {uploading3 ? (
+                                                <CircularProgress size={24} />
+                                              ) : (
+                                                <AddPhotoAlternateIcon sx={{ fontSize: 32, mb: 0.5, color: '#cbd5e1' }} />
+                                              )}
+                                              <Typography variant="caption" sx={{ color: '#64748b', fontSize: '0.7rem' }}>
+                                                {uploading3 ? '上传中...' : '上传图片'}
+                                              </Typography>
+                                            </>
+                                          )}
+                                          <input type="file" accept="image/*" hidden onChange={async (e) => {
+                                            const file = e.target.files?.[0];
+                                            if (!file) return;
+                                            setUploading3(true);
+                                            try {
+                                              const url = await uploadToSupabase(file);
+                                              setImage3(url);
+                                              setSnackbarMsg('中间帧图片上传成功');
+                                              setSnackbarOpen(true);
+                                            } catch (err: any) {
+                                              setSnackbarMsg(err.message || '中间帧上传失败');
+                                              setSnackbarOpen(true);
+                                            } finally {
+                                              setUploading3(false);
+                                              e.target.value = '';
+                                            }
+                                          }} />
+                                        </Button>
+                                      </Box>
+                                    )}
+                                  </Box>
 
                               <Typography variant="caption" color="text.secondary">
                                 {selectedModel === 'veo3-pro-frames' 
@@ -963,18 +987,90 @@ const HomePage = () => {
                       ) : currentModule === 'sora' ? (
                         /* Sora 表单字段 */
                         <>
-                          <TextField
-                            label="Reference Image URL (参考图片 - 选填)"
-                            placeholder="https://example.com/image.jpg"
-                            fullWidth
-                            value={soraUrl}
-                            onChange={(e) => setSoraUrl(e.target.value)}
-                            variant="outlined"
-                            size="small"
-                            InputProps={{
-                              startAdornment: <ImageSearchIcon color="action" sx={{ mr: 1 }} />,
-                            }}
-                          />
+                          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                            <Typography variant="caption" color="text.secondary">Reference Image (参考图片 - 必填)</Typography>
+                            <Box sx={{ width: 110, position: 'relative' }}>
+                                <Button
+                                  variant="outlined"
+                                  component="label"
+                                  disabled={uploadingSora}
+                                  sx={{
+                                    width: '100%',
+                                    aspectRatio: '1/1',
+                                    display: 'flex',
+                                    flexDirection: 'column',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    border: '2px dashed #e2e8f0',
+                                    borderRadius: 2,
+                                    color: 'text.secondary',
+                                    overflow: 'hidden',
+                                    p: 0,
+                                    '&:hover': {
+                                      border: '2px dashed #10b981',
+                                      bgcolor: 'rgba(16, 185, 129, 0.04)'
+                                    }
+                                  }}
+                                >
+                                  {soraUrl ? (
+                                    <Box
+                                      component="img"
+                                      src={soraUrl}
+                                      alt="参考图预览"
+                                      sx={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                                    />
+                                  ) : (
+                                    <>
+                                      {uploadingSora ? (
+                                        <CircularProgress size={24} sx={{ color: '#10b981' }} />
+                                      ) : (
+                                        <AddPhotoAlternateIcon sx={{ fontSize: 32, mb: 0.5, color: '#cbd5e1' }} />
+                                      )}
+                                      <Typography variant="caption" sx={{ color: '#64748b', fontSize: '0.7rem' }}>
+                                        {uploadingSora ? '上传中...' : '上传图片'}
+                                      </Typography>
+                                    </>
+                                  )}
+                                  <input type="file" accept="image/*" hidden onChange={async (e) => {
+                                    const file = e.target.files?.[0];
+                                    if (!file) return;
+                                    setUploadingSora(true);
+                                    try {
+                                      const url = await uploadToSupabase(file);
+                                      setSoraUrl(url);
+                                      setSnackbarMsg('参考图上传成功');
+                                      setSnackbarOpen(true);
+                                    } catch (err: any) {
+                                      setSnackbarMsg(err.message || '上传失败');
+                                      setSnackbarOpen(true);
+                                    } finally {
+                                      setUploadingSora(false);
+                                      e.target.value = '';
+                                    }
+                                  }} />
+                                </Button>
+                                {soraUrl && (
+                                    <IconButton 
+                                        size="small" 
+                                        onClick={(e) => {
+                                            e.preventDefault();
+                                            setSoraUrl('');
+                                        }}
+                                        sx={{ 
+                                            position: 'absolute', 
+                                            top: 2, 
+                                            right: 2, 
+                                            bgcolor: 'rgba(0,0,0,0.5)', 
+                                            color: 'white', 
+                                            p: 0.25,
+                                            '&:hover': { bgcolor: 'rgba(0,0,0,0.7)' }
+                                        }}
+                                    >
+                                        <CloseIcon sx={{ fontSize: 14 }} />
+                                    </IconButton>
+                                )}
+                            </Box>
+                          </Box>
 
                           <Grid container spacing={2}>
                             <Grid size={6}>
@@ -1063,36 +1159,102 @@ const HomePage = () => {
                           )}
                           
                           <Box>
-                            <Box display="flex" gap={1} mb={1}>
-                                <TextField
-                                  label="Add Reference Image URL"
-                                  placeholder="https://example.com/image.jpg"
-                                  fullWidth
-                                  value={nanoInputImage}
-                                  onChange={(e) => setNanoInputImage(e.target.value)}
-                                  variant="outlined"
-                                  size="small"
-                                />
-                                <Button variant="outlined" onClick={() => {
-                                    if(nanoInputImage) {
-                                        setNanoImages([...nanoImages, nanoInputImage]);
-                                        setNanoInputImage('');
-                                    }
-                                }}>Add</Button>
-                            </Box>
-                            <Box display="flex" flexWrap="wrap" gap={1}>
-                                {nanoImages.map((img, idx) => (
-                                    <Chip 
-                                        key={idx} 
-                                        label={`Image ${idx + 1}`} 
-                                        onDelete={() => {
-                                            const newImages = [...nanoImages];
-                                            newImages.splice(idx, 1);
-                                            setNanoImages(newImages);
-                                        }} 
-                                        variant="outlined"
-                                    />
-                                ))}
+                            <Typography variant="caption" color="text.secondary" sx={{ mb: 1, display: 'block' }}>参考图 (Reference Images)</Typography>
+                            
+                            {/* 上传按钮：大正方形，图片列表在下方 */}
+                            <Box>
+                                {/* 上传按钮 */}
+                                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, width: 110, mb: 1 }}>
+                                  <Button
+                                    variant="outlined"
+                                    component="label"
+                                    disabled={uploadingNano}
+                                    sx={{
+                                        width: '100%',
+                                        aspectRatio: '1/1',
+                                        display: 'flex',
+                                        flexDirection: 'column',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        border: '2px dashed #e2e8f0',
+                                        borderRadius: 2,
+                                        color: 'text.secondary',
+                                        overflow: 'hidden',
+                                        p: 0,
+                                        '&:hover': {
+                                            border: '2px dashed #f59e0b',
+                                            bgcolor: 'rgba(245, 158, 11, 0.04)'
+                                        }
+                                    }}
+                                  >
+                                    {uploadingNano ? (
+                                        <CircularProgress size={24} sx={{ color: '#f59e0b' }} />
+                                    ) : (
+                                        <>
+                                          <AddPhotoAlternateIcon sx={{ fontSize: 32, mb: 0.5, color: '#cbd5e1' }} />
+                                          <Typography variant="caption" sx={{ color: '#64748b', fontSize: '0.7rem' }}>
+                                            上传图片
+                                          </Typography>
+                                        </>
+                                    )}
+                                    <input type="file" accept="image/*" hidden onChange={async (e) => {
+                                        const file = e.target.files?.[0];
+                                        if (!file) return;
+                                        setUploadingNano(true);
+                                        try {
+                                            const url = await uploadToSupabase(file);
+                                            setNanoImages([...nanoImages, url]);
+                                            setSnackbarMsg('参考图上传成功');
+                                            setSnackbarOpen(true);
+                                        } catch (err: any) {
+                                            setSnackbarMsg(err.message || '上传失败');
+                                            setSnackbarOpen(true);
+                                        } finally {
+                                            setUploadingNano(false);
+                                            e.target.value = '';
+                                        }
+                                    }} />
+                                  </Button>
+                                </Box>
+
+                                {/* 图片列表：下方小图 */}
+                                <Box display="flex" flexWrap="wrap" gap={1}>
+                                    {nanoImages.map((img, idx) => (
+                                        <Box key={idx} sx={{ 
+                                            position: 'relative', 
+                                            width: 60, 
+                                            height: 60, 
+                                            borderRadius: 1, 
+                                            overflow: 'hidden', 
+                                            border: '1px solid #e2e8f0',
+                                            '&:hover .delete-btn': { opacity: 1 }
+                                        }}>
+                                            <Box component="img" src={img} sx={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                                            <IconButton 
+                                                className="delete-btn"
+                                                size="small" 
+                                                onClick={() => {
+                                                    const newImages = [...nanoImages];
+                                                    newImages.splice(idx, 1);
+                                                    setNanoImages(newImages);
+                                                }}
+                                                sx={{ 
+                                                    position: 'absolute', 
+                                                    top: 2, 
+                                                    right: 2, 
+                                                    bgcolor: 'rgba(0,0,0,0.5)', 
+                                                    color: 'white', 
+                                                    p: 0.25,
+                                                    opacity: 0,
+                                                    transition: 'opacity 0.2s',
+                                                    '&:hover': { bgcolor: 'rgba(0,0,0,0.7)' }
+                                                }}
+                                            >
+                                                <CloseIcon sx={{ fontSize: 14 }} />
+                                            </IconButton>
+                                        </Box>
+                                    ))}
+                                </Box>
                             </Box>
                           </Box>
                         </>

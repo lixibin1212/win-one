@@ -41,6 +41,7 @@ import PhotoLibraryIcon from '@mui/icons-material/PhotoLibrary';
 import AddPhotoAlternateIcon from '@mui/icons-material/AddPhotoAlternate';
 import CloseIcon from '@mui/icons-material/Close';
 import { createClient } from '@supabase/supabase-js';
+import ThreeDCarousel from './ThreeDCarousel';
 
 const theme = createTheme({
   palette: {
@@ -75,6 +76,14 @@ const shine = keyframes`
   100% { left: 200%; }
 `;
 
+// 已移除彩虹流光边框动画（用户不需要）
+
+// 运行态：闪烁文字
+const blink = keyframes`
+  0%, 100% { opacity: 0.25; }
+  50% { opacity: 1; }
+`;
+
 // 轻量卡片通用样式
 const cardBase = {
   p: 3,
@@ -90,66 +99,7 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 const SUPABASE_BUCKET = 'Vwin';
 
-// 轮播图组件
-const Carousel = () => {
-  const [activeStep, setActiveStep] = useState(0);
-  const steps = [
-    { label: '欢迎回来', desc: '高效完成您的工作', bg: 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)' },
-    { label: '系统更新', desc: 'V2.0 版本已上线', bg: 'linear-gradient(135deg, #10b981 0%, #059669 100%)' },
-    { label: '安全提醒', desc: '请定期修改您的密码', bg: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)' },
-  ];
 
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setActiveStep((prev) => (prev + 1) % steps.length);
-    }, 5000);
-    return () => clearInterval(timer);
-  }, []);
-
-  return (
-    <Paper
-      elevation={0}
-      sx={{
-        height: { xs: 300, sm: 360, md: 400 },
-        borderRadius: 0,
-        overflow: 'hidden',
-        position: 'relative',
-        mb: 3,
-        background: steps[activeStep].bg,
-        transition: 'background 1s ease',
-        display: 'flex',
-        flexDirection: 'column',
-        justifyContent: 'center',
-        px: { xs: 3, md: 6 },
-        color: 'white'
-      }}
-    >
-      <Typography variant="h4" fontWeight={800} sx={{ textShadow: '0 2px 10px rgba(0,0,0,0.2)' }}>
-        {steps[activeStep].label}
-      </Typography>
-      <Typography variant="body1" sx={{ opacity: 0.9, mt: 1 }}>
-        {steps[activeStep].desc}
-      </Typography>
-      
-      <Box sx={{ position: 'absolute', bottom: 16, left: '50%', transform: 'translateX(-50%)', display: 'flex', gap: 1 }}>
-        {steps.map((_, index) => (
-          <Box
-            key={index}
-            onClick={() => setActiveStep(index)}
-            sx={{
-              width: 8,
-              height: 8,
-              borderRadius: '50%',
-              bgcolor: index === activeStep ? 'white' : 'rgba(255,255,255,0.4)',
-              cursor: 'pointer',
-              transition: 'all 0.3s'
-            }}
-          />
-        ))}
-      </Box>
-    </Paper>
-  );
-};
 
 const HomePage = () => {
   const navigate = useNavigate();
@@ -190,6 +140,166 @@ const HomePage = () => {
   const [snackbarOpen, setSnackbarOpen] = useState(false);
   const [snackbarMsg, setSnackbarMsg] = useState('');
   const pollTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const generatingModelRef = useRef<string>(''); // 用于记录当前正在生成的模型名称，以便在结果中展示
+
+  // 页面持久化：加载本地缓存的结果与任务队列（避免切换或刷新后丢失）
+  useEffect(() => {
+    try {
+      const cachedResult = localStorage.getItem('vwin_last_generation_result');
+      const cachedJobs = localStorage.getItem('vwin_jobs');
+      if (cachedResult) {
+        setGenerationResult(JSON.parse(cachedResult));
+      }
+      if (cachedJobs) {
+        const parsed = JSON.parse(cachedJobs);
+        if (Array.isArray(parsed)) setJobs(parsed);
+      }
+    } catch (e) {
+      console.warn('Load cache failed', e);
+    }
+  }, []);
+
+  // 当结果变化时，写入本地缓存（避免依赖未声明的 jobs）
+  useEffect(() => {
+    try {
+      if (generationResult) {
+        localStorage.setItem('vwin_last_generation_result', JSON.stringify(generationResult));
+      }
+    } catch (e) {
+      console.warn('Save cache failed', e);
+    }
+  }, [generationResult]);
+
+  // 并行异步队列（仅用于 Veo2 / Veo2 Fast Frames）
+  type Job = {
+    id: string; // 本地队列ID
+    taskId?: string; // 远端任务ID
+    model: 'veo2' | 'veo2-fast-frames';
+    prompt: string;
+    aspect_ratio: string;
+    images?: string[];
+    status: 'queued' | 'submitting' | 'running' | 'succeeded' | 'failed';
+    createdAt: number;
+    result?: { video_url?: string; image_url?: string; raw?: any };
+    error?: string;
+  };
+
+  const [jobs, setJobs] = useState<Job[]>([]);
+  const MAX_PARALLEL = 3;
+
+  // 当队列变化时，写入本地缓存
+  useEffect(() => {
+    try {
+      localStorage.setItem('vwin_jobs', JSON.stringify(jobs));
+    } catch (e) {
+      console.warn('Save jobs cache failed', e);
+    }
+  }, [jobs]);
+
+  // 轮询所有运行中的任务（每3秒）
+  useEffect(() => {
+    const interval = setInterval(async () => {
+      // 仅在 Veo 模块时轮询
+      if (currentModule !== 'veo') return;
+      const running = jobs.filter(j => j.status === 'running' && j.taskId);
+      if (running.length === 0) return;
+      const token = localStorage.getItem('access_token');
+      // 逐个查询状态
+      const updates: Record<string, Partial<Job>> = {};
+      for (const job of running) {
+        try {
+          // 采用统一后端代理：/api/tasks/{taskId}
+          const res = await fetch(`${API_BASE}/api/tasks/${job.taskId}`, {
+            headers: { Authorization: `Bearer ${token}` }
+          });
+          if (!res.ok) continue;
+          const data = await res.json();
+          // 兼容更多状态：SUCCESS/success/succeeded/completed
+          const statusRaw = (data.status || data.data?.status || '').toString().toLowerCase();
+          if (['succeeded', 'success', 'completed'].includes(statusRaw)) {
+            // 优先从 data.output 读取（字符串直链）
+            const output = typeof data.data?.output === 'string' ? data.data.output : undefined;
+            const videoUrl = output || data.video_url || data.data?.video_url || data.output?.video_url || data.result?.video_url;
+            const imageUrl = data.url || data.data?.url || data.output?.url || data.result?.url;
+            updates[job.id] = {
+              status: 'succeeded',
+              result: { video_url: videoUrl, image_url: imageUrl, raw: data }
+            };
+            // 保存到 Supabase
+            const record = {
+              model: job.model,
+              prompt: job.prompt,
+              images: job.images || [],
+              aspect_ratio: job.aspect_ratio,
+              created_at: new Date(job.createdAt).toISOString(),
+              video_url: videoUrl || null,
+              image_url: imageUrl || null
+            };
+            try {
+              await supabase.from('generations').insert(record);
+            } catch (e) {
+              console.warn('Supabase insert failed', e);
+            }
+          } else if (['failed', 'error'].includes(statusRaw) || data.error) {
+            updates[job.id] = { status: 'failed', error: data.error?.message || data.error || '未知错误' };
+          }
+        } catch (e: any) {
+          console.error('poll error', e);
+        }
+      }
+      if (Object.keys(updates).length) {
+        setJobs(prev => prev.map(j => updates[j.id] ? { ...j, ...updates[j.id] } : j));
+      }
+    }, 3000);
+    return () => clearInterval(interval);
+  }, [jobs, currentModule]);
+
+  // 提交队列中的任务（最多并行3）
+  useEffect(() => {
+    const submitNext = async () => {
+      if (currentModule !== 'veo') return;
+      const running = jobs.filter(j => j.status === 'running').length;
+      const capacity = MAX_PARALLEL - running;
+      if (capacity <= 0) return;
+      const toSubmit = jobs.filter(j => j.status === 'queued').slice(0, capacity);
+      if (toSubmit.length === 0) return;
+
+      const token = localStorage.getItem('access_token');
+      for (const job of toSubmit) {
+        // 标记为提交中
+        setJobs(prev => prev.map(j => j.id === job.id ? { ...j, status: 'submitting' } : j));
+        try {
+          const endpoint = '/api/generate/video';
+          const payload: any = {
+            prompt: job.prompt,
+            model: job.model,
+            aspect_ratio: job.aspect_ratio,
+            enhance_prompt: true,
+            enable_upsample: true,
+            images: job.images && job.images.length ? job.images : undefined
+          };
+          const res = await fetch(`${API_BASE}${endpoint}`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify(payload)
+          });
+          if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.detail || '请求失败');
+          }
+          const data = await res.json();
+          const task_id = data.task_id;
+          setJobs(prev => prev.map(j => j.id === job.id ? { ...j, status: 'running', taskId: task_id } : j));
+        } catch (e: any) {
+          setJobs(prev => prev.map(j => j.id === job.id ? { ...j, status: 'failed', error: e.message } : j));
+        }
+      }
+    };
+    submitNext();
+  }, [jobs, currentModule]);
 
   useEffect(() => {
     const token = localStorage.getItem('access_token');
@@ -233,15 +343,17 @@ const HomePage = () => {
           });
           if (res.ok) {
             const data = await res.json();
-            // 假设 API 返回 status 字段，根据实际情况调整
-            // 这里假设 'succeeded' 或 'completed' 为成功
-            if (data.status === 'succeeded' || data.status === 'completed' || data.data?.status === 'succeeded') {
-               setGenerationResult(data);
+          // 统一归一化状态大小写
+          const statusRaw = (data.status || data.data?.status || '').toString().toLowerCase();
+          if (['succeeded', 'success', 'completed'].includes(statusRaw)) {
+               // 注入模型名称
+               const resultWithModel = { ...data, _model: generatingModelRef.current };
+               setGenerationResult(resultWithModel);
                setIsGenerating(false);
                setTaskId(null);
                setSnackbarMsg('视频生成成功！');
                setSnackbarOpen(true);
-            } else if (data.status === 'failed' || data.error) {
+        } else if (['failed', 'error'].includes(statusRaw) || data.error) {
                setIsGenerating(false);
                setTaskId(null);
                setSnackbarMsg('视频生成失败: ' + (data.error?.message || data.error || '未知错误'));
@@ -304,7 +416,29 @@ const HomePage = () => {
       setSnackbarOpen(true);
       return;
     }
+    // Veo 模块：改为异步队列（允许多次提交，并行上限3）
+    if (currentModule === 'veo' && (selectedModel === 'veo2' || selectedModel === 'veo2-fast-frames')) {
+      const images: string[] = [];
+      if (image1) images.push(image1);
+      if (image2) images.push(image2);
+      if (image3) images.push(image3);
+      const id = Math.random().toString(36).slice(2);
+      const newJob: Job = {
+        id,
+        model: selectedModel as 'veo2' | 'veo2-fast-frames',
+        prompt,
+        aspect_ratio: aspectRatio,
+        images: images.length ? images : undefined,
+        status: 'queued',
+        createdAt: Date.now()
+      };
+      setJobs(prev => [newJob, ...prev]);
+      setSnackbarMsg('任务已加入队列');
+      setSnackbarOpen(true);
+      return;
+    }
 
+    // 其他模块保持原逻辑
     setIsGenerating(true);
     setGenerationResult(null);
     setTaskId(null);
@@ -312,6 +446,10 @@ const HomePage = () => {
     const token = localStorage.getItem('access_token');
     let endpoint = '';
     let payload: any = {};
+    
+    // 记录当前模型名称
+    const currentModelName = currentModule === 'sora' ? 'Sora' : (currentModule === 'nano' ? nanoModel : selectedModel);
+    generatingModelRef.current = currentModelName;
 
     if (currentModule === 'sora') {
       endpoint = '/api/proxy/sora/generate';
@@ -368,7 +506,8 @@ const HomePage = () => {
       
       if (currentModule === 'nano') {
           // Nano 直接返回结果
-          setGenerationResult(data);
+          const resultWithModel = { ...data, _model: currentModelName };
+          setGenerationResult(resultWithModel);
           setIsGenerating(false);
           setSnackbarMsg('图片生成成功！');
           setSnackbarOpen(true);
@@ -412,12 +551,58 @@ const HomePage = () => {
 
   return (
     <ThemeProvider theme={theme}>
-      <Box sx={{ minHeight: '100vh', background: 'linear-gradient(160deg,#f5f8fc 0%,#eef4fa 50%,#eaf2fb 100%)', pb: 4 }}>
+      <Box sx={{ 
+        minHeight: '100vh', 
+        bgcolor: '#f8fafc', 
+        backgroundImage: 'radial-gradient(#e2e8f0 1px, transparent 1px)', 
+        backgroundSize: '32px 32px', 
+        pb: 4 
+      }}>
         {/* 1. 顶部导航栏 */}
-        <AppBar position="static" color="transparent" elevation={0} sx={{ bgcolor: 'rgba(255,255,255,0.9)', backdropFilter: 'blur(12px)', borderBottom: '1px solid #e2e8f0' }}>
-          <Toolbar>
+        <AppBar
+          position="static"
+          color="transparent"
+          elevation={0}
+          sx={{
+            // 背景改为淡蓝渐变，营造水体感
+            background: 'linear-gradient(90deg, #eff6ff 0%, #dbeafe 50%, #eff6ff 100%)',
+            backgroundSize: '200% 200%',
+            animation: 'gradientFlow 15s ease infinite',
+            backdropFilter: 'blur(12px)',
+            borderBottom: '1px solid #bfdbfe',
+            position: 'relative',
+            overflow: 'hidden',
+            '&::before': {
+              content: '""',
+              position: 'absolute',
+              inset: '-5%', // 稍微放大以容纳动画移动
+              zIndex: 0,
+              pointerEvents: 'none',
+              // 强烈的波浪纹理：多层波浪，蓝白相间，波浪夹白
+              backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1440 320'%3E%3Cpath fill='%233b82f6' fill-opacity='0.15' d='M0,128L48,144C96,160,192,192,288,197.3C384,203,480,181,576,181.3C672,181,768,203,864,224C960,245,1056,267,1152,250.7C1248,235,1344,181,1392,154.7L1440,128L1440,320L1392,320C1344,320,1248,320,1152,320C1056,320,960,320,864,320C768,320,672,320,576,320C480,320,384,320,288,320C192,320,96,320,48,320L0,320Z'%3E%3C/path%3E%3Cpath fill='%2360a5fa' fill-opacity='0.3' d='M0,224L48,213.3C96,203,192,181,288,181.3C384,181,480,203,576,224C672,245,768,267,864,250.7C960,235,1056,181,1152,165.3C1248,149,1344,171,1392,181.3L1440,192L1440,320L1392,320C1344,320,1248,320,1152,320C1056,320,960,320,864,320C768,320,672,320,576,320C480,320,384,320,288,320C192,320,96,320,48,320L0,320Z'%3E%3C/path%3E%3Cpath fill='%23ffffff' fill-opacity='0.6' d='M0,256L48,245.3C96,235,192,213,288,213.3C384,213,480,235,576,245.3C672,256,768,256,864,245.3C960,235,1056,213,1152,208C1248,203,1344,213,1392,218.7L1440,224L1440,320L1392,320C1344,320,1248,320,1152,320C1056,320,960,320,864,320C768,320,672,320,576,320C480,320,384,320,288,320C192,320,96,320,48,320L0,320Z'%3E%3C/path%3E%3C/svg%3E")`,
+              backgroundRepeat: 'no-repeat',
+              backgroundSize: 'cover',
+              backgroundPosition: 'center',
+              animation: 'waveMove 20s ease-in-out infinite alternate'
+            },
+            '&::after': {
+              content: '""',
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              width: '100%',
+              height: '100%',
+              background: 'linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.3) 50%, transparent 100%)',
+              transform: 'skewX(-20deg)',
+              animation: 'shimmer 8s infinite linear',
+              pointerEvents: 'none',
+              zIndex: 0
+            }
+          }}
+        >
+          <Toolbar sx={{ position: 'relative', zIndex: 1 }}>
             <Typography variant="h6" component="div" sx={{ flexGrow: 1, color: '#1e293b', fontWeight: 700 }}>
-              Vwin Dashboard
+              Vwin
             </Typography>
             
             <Box display="flex" alignItems="center" gap={2}>
@@ -451,7 +636,7 @@ const HomePage = () => {
         </AppBar>
 
         <Container maxWidth="xl" sx={{ mt: 4 }}>
-          <Carousel />
+          <ThreeDCarousel />
           
           <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '280px 1fr' }, gap: 3, alignItems: 'stretch' }}>
             {/* 左侧：模型选择栏 */}
@@ -716,7 +901,7 @@ const HomePage = () => {
                 <Divider sx={{ mb: 2 }} />
                 <Box sx={{ display: 'flex', flexDirection: { xs: 'column', lg: 'row' }, gap: 3, flex: 1, mt: 1 }}>
                   {/* 左侧配置区域 */}
-                  <Box sx={{ flex: { xs: '1 1 auto', lg: '0 0 35%' }, display: 'flex', flexDirection: 'column', minHeight: 440 }}>
+                  <Box sx={{ flex: { xs: '1 1 auto', lg: '0 0 35%' }, display: 'flex', flexDirection: 'column', minHeight: 600 }}>
                     <Box component="form" noValidate autoComplete="off" display="flex" flexDirection="column" gap={3} sx={{ flex: 1 }}>
                       <TextField
                         label="Prompt (提示词)"
@@ -1291,48 +1476,222 @@ const HomePage = () => {
                       </Box>
                     </Box>
                   </Box>
-                  {/* 右侧结果区域：保证不高于左侧表单底部 */}
-                  <Box sx={{ flex: { xs: '1 1 auto', lg: '0 0 65%' }, display: 'flex', flexDirection: 'column', mr: { xs: 0, lg: 1.5 }, minHeight: 440 }}>
-                    <Box sx={{ flex: 1, bgcolor: '#0f172a', color: 'white', borderRadius: 1, p: 2, display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative', mr: { xs: 0, lg: 2 }, mb: 2 }}>
-                      {isGenerating ? (
-                        <Box textAlign="center">
-                          <CircularProgress sx={{ color: '#3b82f6', mb: 2 }} size={56} />
-                          <Typography variant="subtitle1">正在生成...</Typography>
-                          <Typography variant="caption" sx={{ opacity: 0.7 }}>这可能需要几分钟时间</Typography>
-                        </Box>
-                      ) : generationResult ? (
-                        <Box width="100%" display="flex" flexDirection="column" alignItems="center" justifyContent="center" gap={2}>
-                          {generationResult.data && generationResult.data[0]?.url ? (
-                             <img 
-                                src={generationResult.data[0].url} 
-                                style={{ width: '100%', maxHeight: 340, borderRadius: 4, boxShadow: '0 0 16px rgba(0,0,0,0.4)', objectFit: 'contain' }} 
-                                alt="Generated"
-                             />
-                          ) : generationResult.data?.video_url || generationResult.video_url ? (
-                            <video
-                              controls
-                              autoPlay
-                              loop
-                              style={{ width: '100%', maxHeight: 340, borderRadius: 4, boxShadow: '0 0 16px rgba(0,0,0,0.4)' }}
-                              src={generationResult.data?.video_url || generationResult.video_url}
-                            />
-                          ) : (
-                            <Box textAlign="center">
-                              <Typography variant="subtitle1" color="success.main">生成完成</Typography>
-                              <Typography variant="caption" sx={{ mt: 1, opacity: 0.8 }}>
-                                {JSON.stringify(generationResult, null, 2)}
-                              </Typography>
-                            </Box>
-                          )}
-                        </Box>
-                      ) : (
-                        <Box textAlign="center" sx={{ opacity: 0.5 }}>
-                          <MovieCreationIcon sx={{ fontSize: 64, mb: 1 }} />
-                          <Typography variant="subtitle1" fontWeight={700} letterSpacing={1}>RESULT</Typography>
-                          <Typography variant="caption">Your result will appear here</Typography>
+                  {/* 右侧结果区域：统一的大容器，包含大图预览和历史记录 */}
+                  <Box sx={{ 
+                    flex: 1, 
+                    display: 'flex', 
+                    flexDirection: 'column', 
+                    mr: { xs: 0, lg: 3 }, 
+                    height: 'calc(100vh - 200px)', 
+                    minHeight: 600,
+                    bgcolor: '#0f172a', 
+                    color: 'white', 
+                    borderRadius: 1, 
+                    p: 2,
+                    overflowY: 'auto', // 整个区域可滚动
+                    position: 'relative'
+                  }}>
+                    
+                    {/* 统一结果展示区域：Grid 布局 */}
+                    <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr', lg: '1fr 1fr 1fr' }, gap: 2 }}>
+                      {/* 1. 当前生成任务 (非队列模式) */}
+                      {(isGenerating || generationResult) && (
+                        <Box sx={{ position: 'relative' }}>
+                          <Box sx={{ 
+                            height: 120, 
+                            borderRadius: 1, 
+                            overflow: 'hidden', 
+                            position: 'relative', 
+                            display: 'flex', 
+                            alignItems: 'center', 
+                            justifyContent: 'center', 
+                            bgcolor: '#1e293b', 
+                            border: '1px solid rgba(255,255,255,0.06)',
+                            '&:hover .model-tag': { opacity: 1 }
+                          }}>
+                            {/* 模型标签 */}
+                            {(generatingModelRef.current || generationResult?._model) && (
+                              <Chip 
+                                className="model-tag"
+                                label={isGenerating ? generatingModelRef.current : generationResult?._model} 
+                                size="small" 
+                                sx={{ 
+                                  position: 'absolute', 
+                                  top: 8, 
+                                  left: 8, 
+                                  zIndex: 2, 
+                                  bgcolor: 'rgba(0,0,0,0.6)', 
+                                  color: 'white', 
+                                  backdropFilter: 'blur(4px)',
+                                  height: 20,
+                                  borderRadius: '4px',
+                                  opacity: 0,
+                                  transition: 'opacity 0.2s',
+                                  '& .MuiChip-label': { px: 0.8, fontSize: '0.7rem', fontWeight: 600 }
+                                }} 
+                              />
+                            )}
+                            
+                            {isGenerating ? (
+                              <Box
+                                sx={{
+                                  position: 'relative',
+                                  width: '100%',
+                                  height: '100%',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  '&::after': {
+                                    content: '""',
+                                    position: 'absolute',
+                                    inset: 0,
+                                    background: 'linear-gradient(90deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0.08) 50%, rgba(255,255,255,0) 100%)',
+                                    transform: 'skewX(-20deg)',
+                                    animation: `${shine} 1.8s linear infinite`,
+                                  }
+                                }}
+                              >
+                                <Typography
+                                  variant="subtitle2"
+                                  sx={{
+                                    position: 'relative',
+                                    zIndex: 1,
+                                    color: 'rgba(255,255,255,0.85)',
+                                    letterSpacing: 1,
+                                    animation: `${blink} 1.2s ease-in-out infinite`,
+                                  }}
+                                >
+                                  正在生成...
+                                </Typography>
+                              </Box>
+                            ) : (
+                              <>
+                                {generationResult.data && generationResult.data[0]?.url ? (
+                                  <img 
+                                    src={generationResult.data[0].url} 
+                                    style={{ height: '100%', width: '100%', objectFit: 'cover' }} 
+                                    alt="Generated"
+                                  />
+                                ) : (typeof generationResult?.data?.output === 'string') ? (
+                                  <video
+                                    onMouseEnter={(e) => e.currentTarget.controls = true}
+                                    onMouseLeave={(e) => e.currentTarget.controls = false}
+                                    autoPlay
+                                    loop
+                                    style={{ height: '100%', width: '100%', objectFit: 'cover' }}
+                                    src={generationResult.data.output}
+                                  />
+                                ) : generationResult.data?.video_url || generationResult.video_url ? (
+                                  <video
+                                    onMouseEnter={(e) => e.currentTarget.controls = true}
+                                    onMouseLeave={(e) => e.currentTarget.controls = false}
+                                    autoPlay
+                                    loop
+                                    style={{ height: '100%', width: '100%', objectFit: 'cover' }}
+                                    src={generationResult.data?.video_url || generationResult.video_url}
+                                  />
+                                ) : (
+                                  <Box textAlign="center" p={1}>
+                                    <Typography variant="caption" color="success.main">完成</Typography>
+                                  </Box>
+                                )}
+                              </>
+                            )}
+                          </Box>
                         </Box>
                       )}
+
+                      {/* 2. 历史记录卡片 (Veo模式下) */}
+                      {currentModule === 'veo' && jobs.map((job) => (
+                        <Box key={job.id} sx={{ position: 'relative' }}>
+                          <Box sx={{ 
+                            height: 120, 
+                            borderRadius: 1, 
+                            overflow: 'hidden', 
+                            position: 'relative', 
+                            display: 'flex', 
+                            alignItems: 'center', 
+                            justifyContent: 'center', 
+                            bgcolor: '#1e293b', 
+                            border: '1px solid rgba(255,255,255,0.06)',
+                            '&:hover .model-tag': { opacity: 1 }
+                          }}>
+                            {/* 模型标签 */}
+                            <Chip 
+                              className="model-tag"
+                              label={job.model} 
+                              size="small" 
+                              sx={{ 
+                                position: 'absolute', 
+                                top: 8, 
+                                left: 8, 
+                                zIndex: 2, 
+                                bgcolor: 'rgba(0,0,0,0.6)', 
+                                color: 'white', 
+                                backdropFilter: 'blur(4px)',
+                                height: 20,
+                                borderRadius: '4px',
+                                opacity: 0,
+                                transition: 'opacity 0.2s',
+                                '& .MuiChip-label': { px: 0.8, fontSize: '0.7rem', fontWeight: 600 }
+                              }} 
+                            />
+
+                            {job.result?.video_url ? (
+                              <video 
+                                onMouseEnter={(e) => e.currentTarget.controls = true}
+                                onMouseLeave={(e) => e.currentTarget.controls = false}
+                                style={{ height: '100%', width: '100%', objectFit: 'cover' }} 
+                                src={job.result.video_url} 
+                              />
+                            ) : job.result?.image_url ? (
+                              <img src={job.result.image_url} alt="result" style={{ height: '100%', width: '100%', objectFit: 'cover' }} />
+                            ) : (
+                              <Box
+                                sx={{
+                                  position: 'relative',
+                                  width: '100%',
+                                  height: '100%',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  '&::after': {
+                                    content: '""',
+                                    position: 'absolute',
+                                    inset: 0,
+                                    background: 'linear-gradient(90deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0.08) 50%, rgba(255,255,255,0) 100%)',
+                                    transform: 'skewX(-20deg)',
+                                    animation: `${shine} 1.8s linear infinite`,
+                                  }
+                                }}
+                              >
+                                <Typography
+                                  variant="subtitle2"
+                                  sx={{
+                                    position: 'relative',
+                                    zIndex: 1,
+                                    color: 'rgba(255,255,255,0.85)',
+                                    letterSpacing: 1,
+                                    animation: `${blink} 1.2s ease-in-out infinite`,
+                                  }}
+                                >
+                                  正在生成...
+                                </Typography>
+                              </Box>
+                            )}
+                          </Box>
+                        </Box>
+                      ))}
                     </Box>
+
+                    {/* 3. Empty State (既没生成，也没历史) */}
+                    {!isGenerating && !generationResult && (!jobs || jobs.length === 0) && (
+                      <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', opacity: 0.5, minHeight: 400 }}>
+                        <MovieCreationIcon sx={{ fontSize: 64, mb: 1 }} />
+                        <Typography variant="subtitle1" fontWeight={700} letterSpacing={1}>RESULT</Typography>
+                        <Typography variant="caption">Your result will appear here</Typography>
+                      </Box>
+                    )}
                   </Box>
                 </Box>
               </Paper>

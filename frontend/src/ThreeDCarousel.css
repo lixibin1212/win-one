@@ -1,0 +1,222 @@
+.carousel-container {
+  position: relative;
+  width: 100%;
+  height: 600px; /* Increased height to accommodate reflection */
+  perspective: 2000px;
+  overflow: hidden;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  background: #f5f5f7;
+}
+
+.carousel-scene {
+  position: relative;
+  width: 260px; /* Match new card width */
+  height: 360px; /* Match new card height */
+  transform-style: preserve-3d;
+  transition: transform 1s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.carousel-card {
+  position: absolute;
+  width: 260px;
+  height: 360px;
+  left: 0;
+  top: 0;
+  /* Remove background/border/shadow from container to allow reflection outside */
+  background: transparent;
+  perspective: 1000px; /* Optional, for inner 3d if needed */
+  transform-style: preserve-3d;
+  
+  backface-visibility: visible;
+  opacity: 1;
+  transition: opacity 0.5s, transform 0.5s, filter 0.5s;
+  /* overflow: visible is default, needed for reflection */
+  cursor: pointer;
+  will-change: transform, opacity, filter;
+}
+
+.carousel-card-inner {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  background: white;
+  border-radius: 16px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.8);
+  overflow: hidden;
+  transition: box-shadow 0.3s, border 0.3s;
+}
+
+/* Reflection using pseudo-element for stability */
+.carousel-card::after {
+  content: "";
+  position: absolute;
+  top: 100%;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-image: var(--bg-img);
+  background-size: cover;
+  background-position: center;
+  border-radius: 16px;
+  
+  /* Correct reflection physics: Flip vertically */
+  transform: scaleY(-1);
+  /* Add a small gap */
+  margin-top: 10px;
+  
+  /* Fade out from top (near card) to bottom (far away) */
+  /* Since it's flipped, Visual Top = Local Bottom. Visual Bottom = Local Top. */
+  /* We want Visual Top (Feet) to be visible, Visual Bottom (Head) to be invisible. */
+  /* So Local Bottom = Visible, Local Top = Invisible. */
+  /* Gradient to top: Start(Bottom)=Visible, End(Top)=Invisible */
+  mask-image: linear-gradient(to top, rgba(0,0,0,0.6) 0%, rgba(0,0,0,0) 100%);
+  -webkit-mask-image: linear-gradient(to top, rgba(0,0,0,0.6) 0%, rgba(0,0,0,0) 100%);
+  
+  pointer-events: none;
+  z-index: -1; 
+}
+
+/* Dim cards that are not active to enhance depth */
+.carousel-card:not(.active) {
+  filter: brightness(0.7);
+}
+
+.carousel-card.active .carousel-card-inner {
+  box-shadow: 0 30px 60px rgba(0, 0, 0, 0.25);
+  border: 1px solid rgba(255, 255, 255, 1);
+}
+
+.carousel-card-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 16px;
+  transition: transform 0.5s;
+}
+
+.carousel-card:hover .carousel-card-img {
+  transform: scale(1.05);
+}
+
+.carousel-card-overlay {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(to top, rgba(0,0,0,0.6) 0%, transparent 50%);
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: center;
+  padding: 20px;
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+
+.carousel-card.active .carousel-card-overlay,
+.carousel-card:hover .carousel-card-overlay {
+  opacity: 1;
+}
+
+.play-button {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 60px;
+  height: 60px;
+  background: rgba(255, 255, 255, 0.2);
+  backdrop-filter: blur(5px);
+  border-radius: 50%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  border: 2px solid rgba(255, 255, 255, 0.6);
+  opacity: 0;
+  transition: all 0.3s;
+}
+
+.carousel-card.active .play-button {
+  opacity: 1;
+}
+
+.play-button:hover {
+  background: rgba(255, 255, 255, 0.4);
+  transform: translate(-50%, -50%) scale(1.1);
+}
+
+.carousel-card h3 {
+  color: white;
+  margin: 0;
+  font-size: 1.5rem;
+  font-weight: 600;
+  text-shadow: 0 2px 4px rgba(0,0,0,0.5);
+  transform: translateY(20px);
+  transition: transform 0.3s;
+}
+
+.carousel-card.active h3 {
+  transform: translateY(0);
+}
+
+/* Controls - moved closer to center */
+.carousel-control {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.8);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  cursor: pointer;
+  z-index: 100;
+  transition: all 0.3s ease;
+  color: #1d1d1f;
+  box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+}
+
+.carousel-control:hover {
+  background: white;
+  transform: translateY(-50%) scale(1.1);
+  box-shadow: 0 8px 20px rgba(0,0,0,0.15);
+}
+
+.carousel-control.prev {
+  left: 20%; /* Adjusted position */
+}
+
+.carousel-control.next {
+  right: 20%; /* Adjusted position */
+}
+
+.carousel-indicators {
+  position: absolute;
+  bottom: 30px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 8px;
+  z-index: 100;
+}
+
+.carousel-indicator {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.2);
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.carousel-indicator.active {
+  background: #1d1d1f;
+  transform: scale(1.2);
+  width: 24px; /* Pill shape for active */
+  border-radius: 4px;
+}

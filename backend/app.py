@@ -1013,6 +1013,26 @@ async def generate_video(request: VideoGenerationRequest, user = Depends(get_cur
     """统一视频生成接口，根据 model 字段选择行为（veo2 或 veo2-fast-frames）"""
     try:
         task_id = await veo_service.generate_video(request)
+        # 记录到数据库（pending）
+        try:
+            with engine.connect() as conn:
+                conn.execute(
+                    text("""
+                        INSERT INTO generations (task_id, model, prompt, images, aspect_ratio, status, created_at)
+                        VALUES (:task_id, :model, :prompt, :images, :aspect_ratio, :status, NOW())
+                    """),
+                    {
+                        "task_id": task_id,
+                        "model": request.model,
+                        "prompt": request.prompt,
+                        "images": (request.images or []),
+                        "aspect_ratio": request.aspect_ratio,
+                        "status": "pending",
+                    }
+                )
+                conn.commit()
+        except Exception as e:
+            logger.warning(f"Insert generations failed: {e}")
         return {"task_id": task_id}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -1024,6 +1044,34 @@ async def get_task_status(task_id: str, user = Depends(get_current_user)):
     """
     try:
         result = await veo_service.get_task_status(task_id)
+        # 如果成功，更新数据库 video_url / status
+        try:
+            status = result.get("status")
+            video_url = result.get("video_url") or (result.get("data", {}) if isinstance(result.get("data"), dict) else {}).get("video_url")
+            if status == "succeeded":
+                with engine.connect() as conn:
+                    conn.execute(
+                        text("""
+                            UPDATE generations
+                            SET status = 'succeeded', video_url = :video_url, completed_at = NOW()
+                            WHERE task_id = :task_id
+                        """),
+                        {"video_url": video_url, "task_id": task_id}
+                    )
+                    conn.commit()
+            elif status == "failed":
+                with engine.connect() as conn:
+                    conn.execute(
+                        text("""
+                            UPDATE generations
+                            SET status = 'failed', completed_at = NOW()
+                            WHERE task_id = :task_id
+                        """),
+                        {"task_id": task_id}
+                    )
+                    conn.commit()
+        except Exception as e:
+            logger.warning(f"Update generations failed: {e}")
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

@@ -18,7 +18,6 @@ import {
   Menu,
   MenuItem,
   Divider,
-  Container,
   Chip,
   CircularProgress,
   TextField,
@@ -43,6 +42,75 @@ import CloseIcon from '@mui/icons-material/Close';
 import { createClient } from '@supabase/supabase-js';
 import ThreeDCarousel from './ThreeDCarousel';
 
+// 带加载占位的轻量视频组件
+const VideoWithLoader: React.FC<{
+  src: string;
+  autoPlay?: boolean;
+  loop?: boolean;
+  style?: React.CSSProperties;
+}> = ({ src, autoPlay = true, loop = true, style }) => {
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  return (
+    <Box sx={{ position: 'relative', width: '100%', height: '100%' }}>
+      {/* 加载态占位：深色卡片 + 微扫光 + 文字 */}
+      {(loading && !error) && (
+        <Box
+          sx={{
+            position: 'absolute',
+            inset: 0,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            bgcolor: '#0b1220',
+            '&::after': {
+              content: '""',
+              position: 'absolute',
+              inset: 0,
+              background: 'linear-gradient(90deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0.08) 50%, rgba(255,255,255,0) 100%)',
+              transform: 'skewX(-20deg)',
+              animation: `${shine} 1.8s linear infinite`,
+            }
+          }}
+        >
+          <Typography
+            variant="caption"
+            sx={{
+              position: 'relative',
+              zIndex: 1,
+              color: 'rgba(255,255,255,0.85)',
+              letterSpacing: 1,
+              animation: `${blink} 1.2s ease-in-out infinite`,
+            }}
+          >
+            加载中...
+          </Typography>
+        </Box>
+      )}
+
+      {/* 错误占位 */}
+      {error && (
+        <Box sx={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', bgcolor: '#1e293b' }}>
+          <Typography variant="caption" color="error.main">视频加载失败</Typography>
+        </Box>
+      )}
+
+      <video
+        onMouseEnter={(e) => (e.currentTarget.controls = true)}
+        onMouseLeave={(e) => (e.currentTarget.controls = false)}
+        autoPlay={autoPlay}
+        loop={loop}
+        style={style}
+        src={src}
+        onLoadedData={() => setLoading(false)}
+        onCanPlay={() => setLoading(false)}
+        onError={() => setError('failed')}
+      />
+    </Box>
+  );
+};
+
 const theme = createTheme({
   palette: {
     primary: { main: '#2563eb' },
@@ -64,7 +132,22 @@ const theme = createTheme({
     },
     MuiButton: {
       styleOverrides: {
-        root: { textTransform: 'none', fontWeight: 600 }
+        root: {
+          textTransform: 'none',
+          fontWeight: 600,
+          // 保持原有圆角设置，不进行修改
+        },
+        containedPrimary: {
+          // 微光按钮：纯正蓝色渐变 + 内发光 + 同色系投影
+          background: 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)',
+          boxShadow: '0 4px 12px rgba(37, 99, 235, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.2)',
+          transition: 'all 0.3s ease',
+          '&:hover': {
+            background: 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)',
+            boxShadow: '0 8px 20px rgba(37, 99, 235, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.2)',
+            transform: 'translateY(-1px)'
+          }
+        }
       }
     }
   }
@@ -87,9 +170,20 @@ const blink = keyframes`
 // 轻量卡片通用样式
 const cardBase = {
   p: 3,
-  bgcolor: 'white',
-  border: '1px solid #e2e8f0',
-  '&:hover': { boxShadow: '0 10px 24px -6px rgba(30,64,175,0.15)' }
+  // 增加通透感
+  bgcolor: 'rgba(255, 255, 255, 0.75)',
+  backdropFilter: 'blur(20px) saturate(180%)',
+  border: '1px solid rgba(255, 255, 255, 0.6)',
+  // Deep Elevation: 大扩散、低透明度的双层阴影，营造悬浮感
+  boxShadow: '0 20px 40px -4px rgba(37, 99, 235, 0.1), 0 8px 16px -4px rgba(0, 0, 0, 0.05)',
+  borderRadius: '16px', // 保持圆角不变
+  transition: 'all 0.4s cubic-bezier(0.4, 0, 0.2, 1)',
+  '&:hover': {
+    // 悬浮时阴影加深并扩散
+    boxShadow: '0 30px 60px -8px rgba(37, 99, 235, 0.15), 0 12px 24px -6px rgba(0, 0, 0, 0.08)',
+    transform: 'translateY(-4px)',
+    borderColor: 'rgba(255, 255, 255, 0.9)'
+  }
 };
 
 const API_BASE = process.env.REACT_APP_API_BASE || 'http://localhost:8000';
@@ -106,7 +200,7 @@ const HomePage = () => {
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
-  
+
   // 标签页状态
   const [activeTab, setActiveTab] = useState<'veo2' | 'veo3' | 'veo3+' | 'sora2'>('veo2');
   // 模块选择状态
@@ -114,7 +208,7 @@ const HomePage = () => {
 
   // 模型选择状态
   const [selectedModel, setSelectedModel] = useState<string>('veo2');
-  
+
   // Nano Banana states
   const [nanoModel, setNanoModel] = useState('nano-banana-2');
   const [nanoImageSize, setNanoImageSize] = useState('1K');
@@ -141,6 +235,9 @@ const HomePage = () => {
   const [snackbarMsg, setSnackbarMsg] = useState('');
   const pollTimerRef = useRef<NodeJS.Timeout | null>(null);
   const generatingModelRef = useRef<string>(''); // 用于记录当前正在生成的模型名称，以便在结果中展示
+  // 防重复提交：最近一次请求的幂等键与时间戳
+  const lastReqKeyRef = useRef<string>('');
+  const lastReqAtRef = useRef<number>(0);
 
   // 页面持久化：加载本地缓存的结果与任务队列（避免切换或刷新后丢失）
   useEffect(() => {
@@ -174,10 +271,15 @@ const HomePage = () => {
   type Job = {
     id: string; // 本地队列ID
     taskId?: string; // 远端任务ID
-    model: 'veo2' | 'veo2-fast-frames';
+    model: 'veo2' | 'veo2-fast-frames' | 'veo3' | 'veo3-fast' | 'veo3-frames' | 'veo3-pro' | 'veo3-pro-frames' | 'veo3.1-components' | 'veo3.1' | 'veo3.1-pro';
+    module?: 'veo' | 'sora'; // 所属模块
     prompt: string;
     aspect_ratio: string;
     images?: string[];
+    // Sora 专用参数
+    sora_url?: string;
+    duration?: number;
+    size?: string;
     status: 'queued' | 'submitting' | 'running' | 'succeeded' | 'failed';
     createdAt: number;
     result?: { video_url?: string; image_url?: string; raw?: any };
@@ -186,6 +288,8 @@ const HomePage = () => {
 
   const [jobs, setJobs] = useState<Job[]>([]);
   const MAX_PARALLEL = 3;
+  // 后端已提供统一接口：生成 /api/generate/video，查询 /api/tasks/{task_id}
+  // 服务端会根据 model 自动路由（veo2/veo3），前端无需区分
 
   // 当队列变化时，写入本地缓存
   useEffect(() => {
@@ -199,8 +303,7 @@ const HomePage = () => {
   // 轮询所有运行中的任务（每3秒）
   useEffect(() => {
     const interval = setInterval(async () => {
-      // 仅在 Veo 模块时轮询
-      if (currentModule !== 'veo') return;
+      // 支持 Veo/Sora 模块的队列轮询
       const running = jobs.filter(j => j.status === 'running' && j.taskId);
       if (running.length === 0) return;
       const token = localStorage.getItem('access_token');
@@ -208,10 +311,18 @@ const HomePage = () => {
       const updates: Record<string, Partial<Job>> = {};
       for (const job of running) {
         try {
-          // 采用统一后端代理：/api/tasks/{taskId}
-          const res = await fetch(`${API_BASE}/api/tasks/${job.taskId}`, {
-            headers: { Authorization: `Bearer ${token}` }
-          });
+          let res: Response;
+          if (job.module === 'sora') {
+            // Sora 查询接口
+            res = await fetch(`${API_BASE}/api/proxy/sora/result/${job.taskId}`, {
+              headers: { Authorization: `Bearer ${token}` }
+            });
+          } else {
+            // Veo 查询接口
+            res = await fetch(`${API_BASE}/api/tasks/${job.taskId}`, {
+              headers: { Authorization: `Bearer ${token}` }
+            });
+          }
           if (!res.ok) continue;
           const data = await res.json();
           // 兼容更多状态：SUCCESS/success/succeeded/completed
@@ -257,7 +368,7 @@ const HomePage = () => {
   // 提交队列中的任务（最多并行3）
   useEffect(() => {
     const submitNext = async () => {
-      if (currentModule !== 'veo') return;
+      // 支持当前模块的队列提交（veo/sora）
       const running = jobs.filter(j => j.status === 'running').length;
       const capacity = MAX_PARALLEL - running;
       if (capacity <= 0) return;
@@ -269,23 +380,43 @@ const HomePage = () => {
         // 标记为提交中
         setJobs(prev => prev.map(j => j.id === job.id ? { ...j, status: 'submitting' } : j));
         try {
-          const endpoint = '/api/generate/video';
-          const payload: any = {
-            prompt: job.prompt,
-            model: job.model,
-            aspect_ratio: job.aspect_ratio,
-            enhance_prompt: true,
-            enable_upsample: true,
-            images: job.images && job.images.length ? job.images : undefined
-          };
-          const res = await fetch(`${API_BASE}${endpoint}`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${token}`
-            },
-            body: JSON.stringify(payload)
-          });
+          let res: Response;
+          if (job.module === 'sora') {
+            const endpoint = '/api/proxy/sora/generate';
+            const payload: any = {
+              prompt: job.prompt,
+              aspectRatio: job.aspect_ratio,
+              duration: job.duration || 10,
+              size: job.size || 'small',
+              url: job.sora_url || undefined
+            };
+            res = await fetch(`${API_BASE}${endpoint}`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+              },
+              body: JSON.stringify(payload)
+            });
+          } else {
+            const endpoint = '/api/generate/video';
+            const payload: any = {
+              prompt: job.prompt,
+              model: job.model,
+              aspect_ratio: job.aspect_ratio,
+              enhance_prompt: true,
+              enable_upsample: true,
+              images: job.images && job.images.length ? job.images : undefined
+            };
+            res = await fetch(`${API_BASE}${endpoint}`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+              },
+              body: JSON.stringify(payload)
+            });
+          }
           if (!res.ok) {
             const err = await res.json().catch(() => ({}));
             throw new Error(err.detail || '请求失败');
@@ -334,7 +465,7 @@ const HomePage = () => {
           const token = localStorage.getItem('access_token');
           // 根据当前模块选择不同的查询接口
           // Nano 模块不需要轮询，直接返回结果，所以这里不需要处理 nano
-          const statusUrl = currentModule === 'sora' 
+          const statusUrl = currentModule === 'sora'
             ? `${API_BASE}/api/proxy/sora/result/${taskId}`
             : `${API_BASE}/api/tasks/${taskId}`;
 
@@ -343,21 +474,21 @@ const HomePage = () => {
           });
           if (res.ok) {
             const data = await res.json();
-          // 统一归一化状态大小写
-          const statusRaw = (data.status || data.data?.status || '').toString().toLowerCase();
-          if (['succeeded', 'success', 'completed'].includes(statusRaw)) {
-               // 注入模型名称
-               const resultWithModel = { ...data, _model: generatingModelRef.current };
-               setGenerationResult(resultWithModel);
-               setIsGenerating(false);
-               setTaskId(null);
-               setSnackbarMsg('视频生成成功！');
-               setSnackbarOpen(true);
-        } else if (['failed', 'error'].includes(statusRaw) || data.error) {
-               setIsGenerating(false);
-               setTaskId(null);
-               setSnackbarMsg('视频生成失败: ' + (data.error?.message || data.error || '未知错误'));
-               setSnackbarOpen(true);
+            // 统一归一化状态大小写
+            const statusRaw = (data.status || data.data?.status || '').toString().toLowerCase();
+            if (['succeeded', 'success', 'completed'].includes(statusRaw)) {
+              // 注入模型名称
+              const resultWithModel = { ...data, _model: generatingModelRef.current };
+              setGenerationResult(resultWithModel);
+              setIsGenerating(false);
+              setTaskId(null);
+              setSnackbarMsg('视频生成成功！');
+              setSnackbarOpen(true);
+            } else if (['failed', 'error'].includes(statusRaw) || data.error) {
+              setIsGenerating(false);
+              setTaskId(null);
+              setSnackbarMsg('视频生成失败: ' + (data.error?.message || data.error || '未知错误'));
+              setSnackbarOpen(true);
             }
             // 如果是 processing 或 pending，继续轮询
           }
@@ -416,16 +547,40 @@ const HomePage = () => {
       setSnackbarOpen(true);
       return;
     }
+    // 统一构造幂等键（按模块+模型+提示词+主要参数）
+    const mkKey = (obj: any) => {
+      try {
+        const s = JSON.stringify(obj);
+        let hash = 0;
+        for (let i = 0; i < s.length; i++) hash = ((hash << 5) - hash) + s.charCodeAt(i);
+        return `${obj.module || currentModule}:${obj.model || selectedModel}:${hash}`;
+      } catch { return `${currentModule}:${selectedModel}:${prompt.slice(0,32)}`; }
+    };
     // Veo 模块：改为异步队列（允许多次提交，并行上限3）
-    if (currentModule === 'veo' && (selectedModel === 'veo2' || selectedModel === 'veo2-fast-frames')) {
+    // 支持 veo2 与 veo3 / veo3+ 系列（统一走后端 /api/generate/video；后端按 model 路由）
+    const queueModels = [
+      'veo2', 'veo2-fast-frames',
+      'veo3', 'veo3-fast', 'veo3-frames',
+      'veo3-pro', 'veo3-pro-frames',
+      'veo3.1-components', 'veo3.1', 'veo3.1-pro'
+    ];
+    if (currentModule === 'veo' && queueModels.includes(selectedModel)) {
       const images: string[] = [];
       if (image1) images.push(image1);
       if (image2) images.push(image2);
       if (image3) images.push(image3);
+      const reqKey = mkKey({ module: 'veo', model: selectedModel, prompt, aspectRatio, images });
+      const now = Date.now();
+      if (lastReqKeyRef.current === reqKey && (now - lastReqAtRef.current) < 5000) {
+        setSnackbarMsg('短时间内重复提交，已忽略');
+        setSnackbarOpen(true);
+        return;
+      }
+      lastReqKeyRef.current = reqKey; lastReqAtRef.current = now;
       const id = Math.random().toString(36).slice(2);
       const newJob: Job = {
         id,
-        model: selectedModel as 'veo2' | 'veo2-fast-frames',
+        model: selectedModel as Job['model'],
         prompt,
         aspect_ratio: aspectRatio,
         images: images.length ? images : undefined,
@@ -439,6 +594,12 @@ const HomePage = () => {
     }
 
     // 其他模块保持原逻辑
+    // 若已在生成，避免再次触发
+    if (isGenerating) {
+      setSnackbarMsg('正在生成中，请稍候…');
+      setSnackbarOpen(true);
+      return;
+    }
     setIsGenerating(true);
     setGenerationResult(null);
     setTaskId(null);
@@ -446,20 +607,39 @@ const HomePage = () => {
     const token = localStorage.getItem('access_token');
     let endpoint = '';
     let payload: any = {};
-    
+
     // 记录当前模型名称
     const currentModelName = currentModule === 'sora' ? 'Sora' : (currentModule === 'nano' ? nanoModel : selectedModel);
     generatingModelRef.current = currentModelName;
 
     if (currentModule === 'sora') {
-      endpoint = '/api/proxy/sora/generate';
-      payload = {
+      // 走异步队列：Sora2 无水印
+      const id = Math.random().toString(36).slice(2);
+      const reqKey = mkKey({ module: 'sora', model: 'sora2', prompt, aspectRatio, duration, size, url: soraUrl });
+      const now = Date.now();
+      if (lastReqKeyRef.current === reqKey && (now - lastReqAtRef.current) < 5000) {
+        setSnackbarMsg('短时间内重复提交，已忽略');
+        setSnackbarOpen(true);
+        setIsGenerating(false);
+        return;
+      }
+      lastReqKeyRef.current = reqKey; lastReqAtRef.current = now;
+      const newJob: Job = {
+        id,
+        module: 'sora',
+        model: 'sora2' as any,
         prompt,
-        aspectRatio,
+        aspect_ratio: aspectRatio,
+        sora_url: soraUrl || undefined,
         duration,
         size,
-        url: soraUrl || undefined
+        status: 'queued',
+        createdAt: Date.now()
       };
+      setJobs(prev => [newJob, ...prev]);
+      setSnackbarMsg('任务已加入队列');
+      setSnackbarOpen(true);
+      return;
     } else if (currentModule === 'nano') {
       endpoint = '/api/proxy/nano/generate';
       payload = {
@@ -469,9 +649,19 @@ const HomePage = () => {
         image_size: nanoModel === 'nano-banana-2' ? nanoImageSize : undefined,
         images: nanoImages.length > 0 ? nanoImages : undefined
       };
+      // Nano 直接返回结果，也做幂等检查
+      const reqKey = mkKey({ module: 'nano', model: nanoModel, prompt, aspectRatio, image_size: nanoImageSize, images: nanoImages });
+      const now = Date.now();
+      if (lastReqKeyRef.current === reqKey && (now - lastReqAtRef.current) < 5000) {
+        setSnackbarMsg('短时间内重复提交，已忽略');
+        setSnackbarOpen(true);
+        setIsGenerating(false);
+        return;
+      }
+      lastReqKeyRef.current = reqKey; lastReqAtRef.current = now;
     } else {
       endpoint = '/api/generate/video';
-      
+
       const images = [];
       if (image1) images.push(image1);
       if (image2) images.push(image2);
@@ -485,6 +675,15 @@ const HomePage = () => {
         enable_upsample: true,
         images: images.length > 0 ? images : undefined
       };
+      const reqKey = mkKey({ module: 'veo', model: selectedModel, prompt, aspectRatio, images });
+      const now = Date.now();
+      if (lastReqKeyRef.current === reqKey && (now - lastReqAtRef.current) < 5000) {
+        setSnackbarMsg('短时间内重复提交，已忽略');
+        setSnackbarOpen(true);
+        setIsGenerating(false);
+        return;
+      }
+      lastReqKeyRef.current = reqKey; lastReqAtRef.current = now;
     }
 
     try {
@@ -503,18 +702,30 @@ const HomePage = () => {
       }
 
       const data = await res.json();
-      
+
       if (currentModule === 'nano') {
-          // Nano 直接返回结果
-          const resultWithModel = { ...data, _model: currentModelName };
-          setGenerationResult(resultWithModel);
-          setIsGenerating(false);
-          setSnackbarMsg('图片生成成功！');
-          setSnackbarOpen(true);
+        // Nano 直接返回结果
+        const resultWithModel = { ...data, _model: currentModelName };
+        // 去重：如果返回的是数组图片，过滤相同 URL
+        if (Array.isArray(resultWithModel?.data)) {
+          const seen = new Set<string>();
+          resultWithModel.data = resultWithModel.data.filter((it: any) => {
+            const u = it?.url || it?.image_url || it;
+            if (!u) return true;
+            const k = String(u);
+            if (seen.has(k)) return false;
+            seen.add(k);
+            return true;
+          });
+        }
+        setGenerationResult(resultWithModel);
+        setIsGenerating(false);
+        setSnackbarMsg('图片生成成功！');
+        setSnackbarOpen(true);
       } else {
-          setTaskId(data.task_id);
-          setSnackbarMsg('任务已提交，正在生成中...');
-          setSnackbarOpen(true);
+        setTaskId(data.task_id);
+        setSnackbarMsg('任务已提交，正在生成中...');
+        setSnackbarOpen(true);
       }
 
     } catch (error: any) {
@@ -551,12 +762,39 @@ const HomePage = () => {
 
   return (
     <ThemeProvider theme={theme}>
-      <Box sx={{ 
-        minHeight: '100vh', 
-        bgcolor: '#f8fafc', 
-        backgroundImage: 'radial-gradient(#e2e8f0 1px, transparent 1px)', 
-        backgroundSize: '32px 32px', 
-        pb: 4 
+      <Box sx={{
+        minHeight: '100vh',
+        // 弥散光感背景 - 调优版：更清爽、更白净
+        bgcolor: '#f8fafc',
+        background: `
+          radial-gradient(circle at 15% 15%, rgba(219, 234, 254, 0.4) 0%, transparent 50%),
+          radial-gradient(circle at 85% 30%, rgba(255, 255, 255, 0.8) 0%, transparent 50%), /* 右侧调白 */
+          radial-gradient(circle at 50% 0%, rgba(239, 246, 255, 0.5) 0%, transparent 60%),
+          linear-gradient(to bottom, #f0f9ff 0%, #f8fafc 100%)
+        `,
+        // 叠加微妙噪点纹理增加质感
+        backgroundImage: `
+          radial-gradient(circle at 15% 15%, rgba(219, 234, 254, 0.4) 0%, transparent 50%),
+          radial-gradient(circle at 85% 30%, rgba(255, 255, 255, 0.8) 0%, transparent 50%), /* 右侧调白 */
+          radial-gradient(circle at 50% 0%, rgba(239, 246, 255, 0.5) 0%, transparent 60%),
+          linear-gradient(to bottom, #f0f9ff 0%, #f8fafc 100%),
+          url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='0.03'/%3E%3C/svg%3E")
+        `,
+        backgroundSize: '100% 100%, 100% 100%, 100% 100%, 100% 100%, cover',
+        position: 'relative',
+        pb: 4,
+        // 添加微妙的内阴影,增强深度
+        '&::before': {
+          content: '""',
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          right: 0,
+          height: '300px',
+          background: 'linear-gradient(to bottom, rgba(239, 246, 255, 0.3) 0%, transparent 100%)',
+          pointerEvents: 'none',
+          zIndex: 0
+        }
       }}>
         {/* 1. 顶部导航栏 */}
         <AppBar
@@ -572,6 +810,7 @@ const HomePage = () => {
             borderBottom: '1px solid #bfdbfe',
             position: 'relative',
             overflow: 'hidden',
+            zIndex: 1,
             '&::before': {
               content: '""',
               position: 'absolute',
@@ -604,7 +843,7 @@ const HomePage = () => {
             <Typography variant="h6" component="div" sx={{ flexGrow: 1, color: '#1e293b', fontWeight: 700 }}>
               Vwin
             </Typography>
-            
+
             <Box display="flex" alignItems="center" gap={2}>
               <Box display="flex" alignItems="center" gap={1}>
                 <Typography variant="subtitle2" sx={{ color: '#1e293b', display: { xs: 'none', sm: 'block' } }}>
@@ -635,201 +874,106 @@ const HomePage = () => {
           </Toolbar>
         </AppBar>
 
-        <Container maxWidth="xl" sx={{ mt: 4 }}>
+        <Box sx={{
+          mt: 4,
+          width: { xs: '95%', sm: '92%', md: '90%', lg: '88%', xl: '85%' },
+          maxWidth: '1920px',
+          mx: 'auto',
+          px: { xs: 1, sm: 2, md: 3 },
+          position: 'relative',
+          zIndex: 1
+        }}>
           <ThreeDCarousel />
-          
+
           <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '280px 1fr' }, gap: 3, alignItems: 'stretch' }}>
             {/* 左侧：模型选择栏 */}
             <Paper elevation={0} sx={{ ...cardBase, p: 0, display: 'flex', flexDirection: 'column', minHeight: 560 }}>
-                <Box sx={{ p: 2, borderBottom: '1px solid #e2e8f0' }}>
-                  <Typography variant="subtitle1" fontWeight={700}>模型选择</Typography>
-                  <Typography variant="caption" color="text.secondary">选择视频生成模型</Typography>
-                </Box>
-                <Box sx={{ flex: 1, overflowY: 'auto' }}>
-                  <List component="nav" sx={{ py: 1 }}>
-                    <ListItemButton 
-                      selected={currentModule === 'veo'}
-                      onClick={() => {
-                        setCurrentModule('veo');
-                        setActiveTab('veo2');
-                      }}
-                      sx={{ 
-                        mb: 1, mx: 1, borderRadius: 1,
-                        bgcolor: currentModule === 'veo' ? 'rgba(37, 99, 235, 0.08)' : 'transparent',
-                        color: currentModule === 'veo' ? 'primary.main' : 'inherit',
-                        '&.Mui-selected': { bgcolor: 'rgba(37, 99, 235, 0.12)' }
-                      }}
-                    >
-                      <ListItemIcon sx={{ color: currentModule === 'veo' ? 'primary.main' : 'inherit' }}>
-                        <MovieCreationIcon />
-                      </ListItemIcon>
-                      <ListItemText primary="Veo" secondary="适合通用视频生成" />
-                    </ListItemButton>
+              <Box sx={{ p: 2, borderBottom: '1px solid #e2e8f0' }}>
+                <Typography variant="subtitle1" fontWeight={700}>模型选择</Typography>
+                <Typography variant="caption" color="text.secondary">选择视频生成模型</Typography>
+              </Box>
+              <Box sx={{ flex: 1, overflowY: 'auto' }}>
+                <List component="nav" sx={{ py: 1 }}>
+                  <ListItemButton
+                    selected={currentModule === 'veo'}
+                    onClick={() => {
+                      setCurrentModule('veo');
+                      setActiveTab('veo2');
+                    }}
+                    sx={{
+                      mb: 1, mx: 1, borderRadius: 1,
+                      bgcolor: currentModule === 'veo' ? 'rgba(37, 99, 235, 0.08)' : 'transparent',
+                      color: currentModule === 'veo' ? 'primary.main' : 'inherit',
+                      '&.Mui-selected': { bgcolor: 'rgba(37, 99, 235, 0.12)' }
+                    }}
+                  >
+                    <ListItemIcon sx={{ color: currentModule === 'veo' ? 'primary.main' : 'inherit' }}>
+                      <MovieCreationIcon />
+                    </ListItemIcon>
+                    <ListItemText primary="Veo" secondary="适合通用视频生成" />
+                  </ListItemButton>
 
-                    <ListItemButton 
-                      selected={currentModule === 'sora'}
-                      onClick={() => {
-                        setCurrentModule('sora');
-                        setActiveTab('sora2');
-                      }}
-                      sx={{ 
-                        mb: 1, mx: 1, borderRadius: 1,
-                        bgcolor: currentModule === 'sora' ? 'rgba(16, 185, 129, 0.08)' : 'transparent',
-                        color: currentModule === 'sora' ? 'secondary.main' : 'inherit',
-                        '&.Mui-selected': { bgcolor: 'rgba(16, 185, 129, 0.12)' }
-                      }}
-                    >
-                      <ListItemIcon sx={{ color: currentModule === 'sora' ? 'secondary.main' : 'inherit' }}>
-                        <DashboardIcon />
-                      </ListItemIcon>
-                      <ListItemText primary="Sora" secondary="Sora2 无水印生成" />
-                    </ListItemButton>
+                  <ListItemButton
+                    selected={currentModule === 'sora'}
+                    onClick={() => {
+                      setCurrentModule('sora');
+                      setActiveTab('sora2');
+                    }}
+                    sx={{
+                      mb: 1, mx: 1, borderRadius: 1,
+                      bgcolor: currentModule === 'sora' ? 'rgba(16, 185, 129, 0.08)' : 'transparent',
+                      color: currentModule === 'sora' ? 'secondary.main' : 'inherit',
+                      '&.Mui-selected': { bgcolor: 'rgba(16, 185, 129, 0.12)' }
+                    }}
+                  >
+                    <ListItemIcon sx={{ color: currentModule === 'sora' ? 'secondary.main' : 'inherit' }}>
+                      <DashboardIcon />
+                    </ListItemIcon>
+                    <ListItemText primary="Sora" secondary="Sora2 无水印生成" />
+                  </ListItemButton>
 
-                    <ListItemButton 
-                      selected={currentModule === 'nano'}
-                      onClick={() => setCurrentModule('nano')}
-                      sx={{ 
-                        mb: 1, mx: 1, borderRadius: 1,
-                        bgcolor: currentModule === 'nano' ? 'rgba(245, 158, 11, 0.08)' : 'transparent',
-                        color: currentModule === 'nano' ? '#f59e0b' : 'inherit',
-                        '&.Mui-selected': { bgcolor: 'rgba(245, 158, 11, 0.12)' }
-                      }}
-                    >
-                      <ListItemIcon sx={{ color: currentModule === 'nano' ? '#f59e0b' : 'inherit' }}>
-                        <PhotoLibraryIcon />
-                      </ListItemIcon>
-                      <ListItemText primary="Nano Banana" secondary="AI 图片生成" />
-                    </ListItemButton>
-                  </List>
-                </Box>
-              </Paper>
+                  <ListItemButton
+                    selected={currentModule === 'nano'}
+                    onClick={() => setCurrentModule('nano')}
+                    sx={{
+                      mb: 1, mx: 1, borderRadius: 1,
+                      bgcolor: currentModule === 'nano' ? 'rgba(245, 158, 11, 0.08)' : 'transparent',
+                      color: currentModule === 'nano' ? '#f59e0b' : 'inherit',
+                      '&.Mui-selected': { bgcolor: 'rgba(245, 158, 11, 0.12)' }
+                    }}
+                  >
+                    <ListItemIcon sx={{ color: currentModule === 'nano' ? '#f59e0b' : 'inherit' }}>
+                      <PhotoLibraryIcon />
+                    </ListItemIcon>
+                    <ListItemText primary="Nano Banana" secondary="AI 图片生成" />
+                  </ListItemButton>
+                </List>
+              </Box>
+            </Paper>
 
             {/* 右侧：工作区（标题与分隔线全宽，结果区域从线下方开始） */}
             <Paper elevation={0} sx={{ ...cardBase, minHeight: 560, display: 'flex', flexDirection: 'column' }}>
-                <Box sx={{ display: 'flex', gap: 2, mb: 2 }}>
-                  {currentModule === 'veo' ? (
-                    <>
-                      {/* Veo2 Tab */}
-                      <Box 
-                        onClick={() => setActiveTab('veo2')}
-                        sx={{ 
-                          position: 'relative',
-                          bgcolor: activeTab === 'veo2' ? '#2563eb' : '#e2e8f0', 
-                          color: activeTab === 'veo2' ? 'white' : '#64748b', 
-                          pl: 3,
-                          pr: 3,
-                          py: 0.75, 
-                          width: 'fit-content', 
-                          cursor: 'pointer',
-                          clipPath: 'polygon(0% 0%, calc(100% - 12px) 0%, 100% 50%, calc(100% - 12px) 100%, 0% 100%, 12px 50%)',
-                          display: 'flex',
-                          alignItems: 'center',
-                          overflow: 'hidden',
-                          transition: 'all 0.3s',
-                          '&::after': activeTab === 'veo2' ? {
-                            content: '""',
-                            position: 'absolute',
-                            top: 0,
-                            bottom: 0,
-                            width: '6px',
-                            bgcolor: 'rgba(255, 255, 255, 0.4)',
-                            transform: 'skewX(-20deg)',
-                            animation: `${shine} 1.5s infinite linear`
-                          } : {}
-                        }}
-                      >
-                        <Typography variant="subtitle1" fontWeight={700}>
-                          veo2
-                        </Typography>
-                      </Box>
-
-                      {/* Veo3 Tab */}
-                      <Box 
-                        onClick={() => setActiveTab('veo3')}
-                        sx={{ 
-                          position: 'relative',
-                          bgcolor: activeTab === 'veo3' ? '#f59e0b' : '#e2e8f0', 
-                          color: activeTab === 'veo3' ? 'white' : '#64748b', 
-                          pl: 3,
-                          pr: 3,
-                          py: 0.75, 
-                          width: 'fit-content', 
-                          cursor: 'pointer',
-                          clipPath: 'polygon(0% 0%, calc(100% - 12px) 0%, 100% 50%, calc(100% - 12px) 100%, 0% 100%, 12px 50%)',
-                          display: 'flex',
-                          alignItems: 'center',
-                          overflow: 'hidden',
-                          transition: 'all 0.3s',
-                          '&::after': activeTab === 'veo3' ? {
-                            content: '""',
-                            position: 'absolute',
-                            top: 0,
-                            bottom: 0,
-                            width: '6px',
-                            bgcolor: 'rgba(255, 255, 255, 0.4)',
-                            transform: 'skewX(-20deg)',
-                            animation: `${shine} 1.5s infinite linear`
-                          } : {}
-                        }}
-                      >
-                        <Typography variant="subtitle1" fontWeight={700}>
-                          veo3
-                        </Typography>
-                      </Box>
-
-                      {/* Veo3+ Tab */}
-                      <Box 
-                        onClick={() => setActiveTab('veo3+')}
-                        sx={{ 
-                          position: 'relative',
-                          bgcolor: activeTab === 'veo3+' ? '#10b981' : '#e2e8f0', 
-                          color: activeTab === 'veo3+' ? 'white' : '#64748b', 
-                          pl: 3,
-                          pr: 3,
-                          py: 0.75, 
-                          width: 'fit-content', 
-                          cursor: 'pointer',
-                          clipPath: 'polygon(0% 0%, calc(100% - 12px) 0%, 100% 50%, calc(100% - 12px) 100%, 0% 100%, 12px 50%)',
-                          display: 'flex',
-                          alignItems: 'center',
-                          overflow: 'hidden',
-                          transition: 'all 0.3s',
-                          '&::after': activeTab === 'veo3+' ? {
-                            content: '""',
-                            position: 'absolute',
-                            top: 0,
-                            bottom: 0,
-                            width: '6px',
-                            bgcolor: 'rgba(255, 255, 255, 0.4)',
-                            transform: 'skewX(-20deg)',
-                            animation: `${shine} 1.5s infinite linear`
-                          } : {}
-                        }}
-                      >
-                        <Typography variant="subtitle1" fontWeight={700}>
-                          veo3+
-                        </Typography>
-                      </Box>
-                    </>
-                  ) : currentModule === 'sora' ? (
-                    /* Sora Tab */
-                    <Box 
-                      onClick={() => setActiveTab('sora2')}
-                      sx={{ 
+              <Box sx={{ display: 'flex', gap: 2, mb: 2 }}>
+                {currentModule === 'veo' ? (
+                  <>
+                    {/* Veo2 Tab */}
+                    <Box
+                      onClick={() => setActiveTab('veo2')}
+                      sx={{
                         position: 'relative',
-                        bgcolor: '#10b981', 
-                        color: 'white', 
+                        bgcolor: activeTab === 'veo2' ? '#2563eb' : '#e2e8f0',
+                        color: activeTab === 'veo2' ? 'white' : '#64748b',
                         pl: 3,
-                        pr: 6,
-                        py: 0.75, 
-                        width: 'fit-content', 
+                        pr: 3,
+                        py: 0.75,
+                        width: 'fit-content',
                         cursor: 'pointer',
                         clipPath: 'polygon(0% 0%, calc(100% - 12px) 0%, 100% 50%, calc(100% - 12px) 100%, 0% 100%, 12px 50%)',
                         display: 'flex',
                         alignItems: 'center',
                         overflow: 'hidden',
                         transition: 'all 0.3s',
-                        '&::after': {
+                        '&::after': activeTab === 'veo2' ? {
                           content: '""',
                           position: 'absolute',
                           top: 0,
@@ -838,49 +982,32 @@ const HomePage = () => {
                           bgcolor: 'rgba(255, 255, 255, 0.4)',
                           transform: 'skewX(-20deg)',
                           animation: `${shine} 1.5s infinite linear`
-                        }
+                        } : {}
                       }}
                     >
-                      <Box sx={{ position: 'relative' }}>
-                        <Typography variant="subtitle1" fontWeight={700}>
-                          Sora2
-                        </Typography>
-                        <Box
-                          sx={{
-                            position: 'absolute',
-                            top: -4,
-                            left: '100%',
-                            ml: -0.5,
-                            fontSize: '10px',
-                            border: '1px solid white',
-                            borderRadius: '10px',
-                            px: 0.5,
-                            whiteSpace: 'nowrap',
-                            lineHeight: 1.2,
-                            transform: 'scale(0.9)',
-                            transformOrigin: 'left center'
-                          }}
-                        >
-                          无水印
-                        </Box>
-                      </Box>
+                      <Typography variant="subtitle1" fontWeight={700}>
+                        veo2
+                      </Typography>
                     </Box>
-                  ) : (
-                    /* Nano Tab */
-                    <Box 
-                      sx={{ 
+
+                    {/* Veo3 Tab */}
+                    <Box
+                      onClick={() => setActiveTab('veo3')}
+                      sx={{
                         position: 'relative',
-                        bgcolor: '#f59e0b', 
-                        color: 'white', 
+                        bgcolor: activeTab === 'veo3' ? '#f59e0b' : '#e2e8f0',
+                        color: activeTab === 'veo3' ? 'white' : '#64748b',
                         pl: 3,
                         pr: 3,
-                        py: 0.75, 
-                        width: 'fit-content', 
+                        py: 0.75,
+                        width: 'fit-content',
+                        cursor: 'pointer',
                         clipPath: 'polygon(0% 0%, calc(100% - 12px) 0%, 100% 50%, calc(100% - 12px) 100%, 0% 100%, 12px 50%)',
                         display: 'flex',
                         alignItems: 'center',
                         overflow: 'hidden',
-                        '&::after': {
+                        transition: 'all 0.3s',
+                        '&::after': activeTab === 'veo3' ? {
                           content: '""',
                           position: 'absolute',
                           top: 0,
@@ -889,296 +1016,167 @@ const HomePage = () => {
                           bgcolor: 'rgba(255, 255, 255, 0.4)',
                           transform: 'skewX(-20deg)',
                           animation: `${shine} 1.5s infinite linear`
-                        }
+                        } : {}
                       }}
                     >
                       <Typography variant="subtitle1" fontWeight={700}>
-                        Nano Banana
+                        veo3
                       </Typography>
                     </Box>
-                  )}
-                </Box>
-                <Divider sx={{ mb: 2 }} />
-                <Box sx={{ display: 'flex', flexDirection: { xs: 'column', lg: 'row' }, gap: 3, flex: 1, mt: 1 }}>
-                  {/* 左侧配置区域 */}
-                  <Box sx={{ flex: { xs: '1 1 auto', lg: '0 0 35%' }, display: 'flex', flexDirection: 'column', minHeight: 600 }}>
-                    <Box component="form" noValidate autoComplete="off" display="flex" flexDirection="column" gap={3} sx={{ flex: 1 }}>
-                      <TextField
-                        label="Prompt (提示词)"
-                        multiline
-                        rows={4}
-                        placeholder="Describe the image you want to create..."
-                        fullWidth
-                        value={prompt}
-                        onChange={(e) => setPrompt(e.target.value)}
-                        variant="outlined"
-                        sx={{ bgcolor: '#f8fafc' }}
-                      />
 
-                      {currentModule === 'veo' ? (
-                        /* Veo 表单字段 */
-                        <>
-                          {/* 仅当模型支持图片输入时显示 (veo2-fast-frames 或 veo3 系列 或 veo3+ 系列) */}
-                          {(selectedModel === 'veo2-fast-frames' || selectedModel.startsWith('veo3')) && (
-                            <>
-                              {/* 上传框并行显示：首帧、尾帧、中间帧 */}
-                                  <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
-                                    {/* 本地上传：首帧 Image 1 */}
-                                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, width: 110 }}>
-                                      <Typography variant="caption" color="text.secondary">参考图1</Typography>
-                                      <Button
-                                        variant="outlined"
-                                        component="label"
-                                        disabled={uploading1}
-                                        sx={{
-                                          width: '100%',
-                                          aspectRatio: '1/1',
-                                          display: 'flex',
-                                          flexDirection: 'column',
-                                          alignItems: 'center',
-                                          justifyContent: 'center',
-                                          border: '2px dashed #e2e8f0',
-                                          borderRadius: 2,
-                                          color: 'text.secondary',
-                                          overflow: 'hidden',
-                                          p: 0,
-                                          '&:hover': {
-                                            border: '2px dashed #2563eb',
-                                            bgcolor: 'rgba(37, 99, 235, 0.04)'
-                                          }
-                                        }}
-                                      >
-                                        {image1 ? (
-                                          <Box
-                                            component="img"
-                                            src={image1}
-                                            alt="首帧预览"
-                                            sx={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                                          />
-                                        ) : (
-                                          <>
-                                            {uploading1 ? (
-                                              <CircularProgress size={24} />
-                                            ) : (
-                                              <AddPhotoAlternateIcon sx={{ fontSize: 32, mb: 0.5, color: '#cbd5e1' }} />
-                                            )}
-                                            <Typography variant="caption" sx={{ color: '#64748b', fontSize: '0.7rem' }}>
-                                              {uploading1 ? '上传中...' : '上传图片'}
-                                            </Typography>
-                                          </>
-                                        )}
-                                        <input type="file" accept="image/*" hidden onChange={async (e) => {
-                                          const file = e.target.files?.[0];
-                                          if (!file) return;
-                                          setUploading1(true);
-                                          try {
-                                            const url = await uploadToSupabase(file);
-                                            setImage1(url);
-                                            setSnackbarMsg('首帧图片上传成功');
-                                            setSnackbarOpen(true);
-                                          } catch (err: any) {
-                                            setSnackbarMsg(err.message || '首帧上传失败');
-                                            setSnackbarOpen(true);
-                                          } finally {
-                                            setUploading1(false);
-                                            e.target.value = '';
-                                          }
-                                        }} />
-                                      </Button>
-                                    </Box>
+                    {/* Veo3+ Tab */}
+                    <Box
+                      onClick={() => setActiveTab('veo3+')}
+                      sx={{
+                        position: 'relative',
+                        bgcolor: activeTab === 'veo3+' ? '#10b981' : '#e2e8f0',
+                        color: activeTab === 'veo3+' ? 'white' : '#64748b',
+                        pl: 3,
+                        pr: 3,
+                        py: 0.75,
+                        width: 'fit-content',
+                        cursor: 'pointer',
+                        clipPath: 'polygon(0% 0%, calc(100% - 12px) 0%, 100% 50%, calc(100% - 12px) 100%, 0% 100%, 12px 50%)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        overflow: 'hidden',
+                        transition: 'all 0.3s',
+                        '&::after': activeTab === 'veo3+' ? {
+                          content: '""',
+                          position: 'absolute',
+                          top: 0,
+                          bottom: 0,
+                          width: '6px',
+                          bgcolor: 'rgba(255, 255, 255, 0.4)',
+                          transform: 'skewX(-20deg)',
+                          animation: `${shine} 1.5s infinite linear`
+                        } : {}
+                      }}
+                    >
+                      <Typography variant="subtitle1" fontWeight={700}>
+                        veo3+
+                      </Typography>
+                    </Box>
+                  </>
+                ) : currentModule === 'sora' ? (
+                  /* Sora Tab */
+                  <Box
+                    onClick={() => setActiveTab('sora2')}
+                    sx={{
+                      position: 'relative',
+                      bgcolor: '#10b981',
+                      color: 'white',
+                      pl: 3,
+                      pr: 6,
+                      py: 0.75,
+                      width: 'fit-content',
+                      cursor: 'pointer',
+                      clipPath: 'polygon(0% 0%, calc(100% - 12px) 0%, 100% 50%, calc(100% - 12px) 100%, 0% 100%, 12px 50%)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      overflow: 'hidden',
+                      transition: 'all 0.3s',
+                      '&::after': {
+                        content: '""',
+                        position: 'absolute',
+                        top: 0,
+                        bottom: 0,
+                        width: '6px',
+                        bgcolor: 'rgba(255, 255, 255, 0.4)',
+                        transform: 'skewX(-20deg)',
+                        animation: `${shine} 1.5s infinite linear`
+                      }
+                    }}
+                  >
+                    <Box sx={{ position: 'relative' }}>
+                      <Typography variant="subtitle1" fontWeight={700}>
+                        Sora2
+                      </Typography>
+                      <Box
+                        sx={{
+                          position: 'absolute',
+                          top: -4,
+                          left: '100%',
+                          ml: -0.5,
+                          fontSize: '10px',
+                          border: '1px solid white',
+                          borderRadius: '10px',
+                          px: 0.5,
+                          whiteSpace: 'nowrap',
+                          lineHeight: 1.2,
+                          transform: 'scale(0.9)',
+                          transformOrigin: 'left center'
+                        }}
+                      >
+                        无水印
+                      </Box>
+                    </Box>
+                  </Box>
+                ) : (
+                  /* Nano Tab */
+                  <Box
+                    sx={{
+                      position: 'relative',
+                      bgcolor: '#f59e0b',
+                      color: 'white',
+                      pl: 3,
+                      pr: 3,
+                      py: 0.75,
+                      width: 'fit-content',
+                      clipPath: 'polygon(0% 0%, calc(100% - 12px) 0%, 100% 50%, calc(100% - 12px) 100%, 0% 100%, 12px 50%)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      overflow: 'hidden',
+                      '&::after': {
+                        content: '""',
+                        position: 'absolute',
+                        top: 0,
+                        bottom: 0,
+                        width: '6px',
+                        bgcolor: 'rgba(255, 255, 255, 0.4)',
+                        transform: 'skewX(-20deg)',
+                        animation: `${shine} 1.5s infinite linear`
+                      }
+                    }}
+                  >
+                    <Typography variant="subtitle1" fontWeight={700}>
+                      Nano Banana
+                    </Typography>
+                  </Box>
+                )}
+              </Box>
+              <Divider sx={{ mb: 2 }} />
+              <Box sx={{ display: 'flex', flexDirection: { xs: 'column', lg: 'row' }, gap: 3, flex: 1, mt: 1 }}>
+                {/* 左侧配置区域 */}
+                <Box sx={{ flex: { xs: '1 1 auto', lg: '0 0 35%' }, display: 'flex', flexDirection: 'column', minHeight: 600 }}>
+                  <Box component="form" noValidate autoComplete="off" display="flex" flexDirection="column" gap={3} sx={{ flex: 1 }}>
+                    <TextField
+                      label="Prompt (提示词)"
+                      multiline
+                      rows={4}
+                      placeholder="Describe the image you want to create..."
+                      fullWidth
+                      value={prompt}
+                      onChange={(e) => setPrompt(e.target.value)}
+                      variant="outlined"
+                      sx={{ bgcolor: '#f8fafc' }}
+                    />
 
-                                    {/* 本地上传：尾帧 Image 2 */}
-                                    {selectedModel !== 'veo3-pro-frames' && (
-                                      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, width: 110 }}>
-                                        <Typography variant="caption" color="text.secondary">参考图2</Typography>
-                                        <Button
-                                          variant="outlined"
-                                          component="label"
-                                          disabled={uploading2}
-                                          sx={{
-                                            width: '100%',
-                                            aspectRatio: '1/1',
-                                            display: 'flex',
-                                            flexDirection: 'column',
-                                            alignItems: 'center',
-                                            justifyContent: 'center',
-                                            border: '2px dashed #e2e8f0',
-                                            borderRadius: 2,
-                                            color: 'text.secondary',
-                                            overflow: 'hidden',
-                                            p: 0,
-                                            '&:hover': {
-                                              border: '2px dashed #2563eb',
-                                              bgcolor: 'rgba(37, 99, 235, 0.04)'
-                                            }
-                                          }}
-                                        >
-                                          {image2 ? (
-                                            <Box
-                                              component="img"
-                                              src={image2}
-                                              alt="尾帧预览"
-                                              sx={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                                            />
-                                          ) : (
-                                            <>
-                                              {uploading2 ? (
-                                                <CircularProgress size={24} />
-                                              ) : (
-                                                <AddPhotoAlternateIcon sx={{ fontSize: 32, mb: 0.5, color: '#cbd5e1' }} />
-                                              )}
-                                              <Typography variant="caption" sx={{ color: '#64748b', fontSize: '0.7rem' }}>
-                                                {uploading2 ? '上传中...' : '上传图片'}
-                                              </Typography>
-                                            </>
-                                          )}
-                                          <input type="file" accept="image/*" hidden onChange={async (e) => {
-                                            const file = e.target.files?.[0];
-                                            if (!file) return;
-                                            setUploading2(true);
-                                            try {
-                                              const url = await uploadToSupabase(file);
-                                              setImage2(url);
-                                              setSnackbarMsg('尾帧图片上传成功');
-                                              setSnackbarOpen(true);
-                                            } catch (err: any) {
-                                              setSnackbarMsg(err.message || '尾帧上传失败');
-                                              setSnackbarOpen(true);
-                                            } finally {
-                                              setUploading2(false);
-                                              e.target.value = '';
-                                            }
-                                          }} />
-                                        </Button>
-                                      </Box>
-                                    )}
-
-                                    {/* 本地上传：中间帧 Image 3 */}
-                                    {selectedModel === 'veo3.1-components' && (
-                                      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, width: 110 }}>
-                                        <Typography variant="caption" color="text.secondary">参考图3</Typography>
-                                        <Button
-                                          variant="outlined"
-                                          component="label"
-                                          disabled={uploading3}
-                                          sx={{
-                                            width: '100%',
-                                            aspectRatio: '1/1',
-                                            display: 'flex',
-                                            flexDirection: 'column',
-                                            alignItems: 'center',
-                                            justifyContent: 'center',
-                                            border: '2px dashed #e2e8f0',
-                                            borderRadius: 2,
-                                            color: 'text.secondary',
-                                            overflow: 'hidden',
-                                            p: 0,
-                                            '&:hover': {
-                                              border: '2px dashed #2563eb',
-                                              bgcolor: 'rgba(37, 99, 235, 0.04)'
-                                            }
-                                          }}
-                                        >
-                                          {image3 ? (
-                                            <Box
-                                              component="img"
-                                              src={image3}
-                                              alt="中间帧预览"
-                                              sx={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                                            />
-                                          ) : (
-                                            <>
-                                              {uploading3 ? (
-                                                <CircularProgress size={24} />
-                                              ) : (
-                                                <AddPhotoAlternateIcon sx={{ fontSize: 32, mb: 0.5, color: '#cbd5e1' }} />
-                                              )}
-                                              <Typography variant="caption" sx={{ color: '#64748b', fontSize: '0.7rem' }}>
-                                                {uploading3 ? '上传中...' : '上传图片'}
-                                              </Typography>
-                                            </>
-                                          )}
-                                          <input type="file" accept="image/*" hidden onChange={async (e) => {
-                                            const file = e.target.files?.[0];
-                                            if (!file) return;
-                                            setUploading3(true);
-                                            try {
-                                              const url = await uploadToSupabase(file);
-                                              setImage3(url);
-                                              setSnackbarMsg('中间帧图片上传成功');
-                                              setSnackbarOpen(true);
-                                            } catch (err: any) {
-                                              setSnackbarMsg(err.message || '中间帧上传失败');
-                                              setSnackbarOpen(true);
-                                            } finally {
-                                              setUploading3(false);
-                                              e.target.value = '';
-                                            }
-                                          }} />
-                                        </Button>
-                                      </Box>
-                                    )}
-                                  </Box>
-
-                              <Typography variant="caption" color="text.secondary">
-                                {selectedModel === 'veo3-pro-frames' 
-                                  ? '* 仅支持上传一张图片作为参考。'
-                                  : selectedModel === 'veo3.1-components'
-                                  ? '* 支持上传最多三张图片作为参考。'
-                                  : '* 只传一张图片作为首帧参考，传两张则分别为首帧和尾帧。（veo2-fast-frames 支持本地上传）'}
-                              </Typography>
-                            </>
-                          )}
-
-                          <Box display="flex" gap={2}>
-                            <FormControl fullWidth size="small">
-                              <InputLabel>Aspect Ratio</InputLabel>
-                              <Select
-                                value={aspectRatio}
-                                label="Aspect Ratio"
-                                onChange={(e) => setAspectRatio(e.target.value)}
-                              >
-                                <MenuItem value="16:9">Cinema (16:9)</MenuItem>
-                                <MenuItem value="9:16">Portrait (9:16)</MenuItem>
-                              </Select>
-                            </FormControl>
-                          </Box>
-
-                          {/* 模型选择（右侧表单控制，不联动左侧） */}
-                          <FormControl fullWidth size="small">
-                            <InputLabel>Model</InputLabel>
-                            <Select
-                              value={selectedModel}
-                              label="Model"
-                              onChange={(e) => setSelectedModel(e.target.value)}
-                            >
-                              {activeTab === 'veo2' ? [
-                                <MenuItem key="veo2" value="veo2">Veo2</MenuItem>,
-                                <MenuItem key="veo2-fast-frames" value="veo2-fast-frames">Veo2 Fast Frames</MenuItem>
-                              ] : activeTab === 'veo3' ? [
-                                <MenuItem key="veo3" value="veo3">Veo3</MenuItem>,
-                                <MenuItem key="veo3-fast" value="veo3-fast">Veo3 Fast</MenuItem>,
-                                <MenuItem key="veo3-frames" value="veo3-frames">Veo3 Frames</MenuItem>
-                              ] : [
-                                <MenuItem key="veo3-pro" value="veo3-pro">Veo3 Pro (首尾帧)</MenuItem>,
-                                <MenuItem key="veo3-pro-frames" value="veo3-pro-frames">Veo3 Pro Frames (单图)</MenuItem>,
-                                <MenuItem key="veo3.1-components" value="veo3.1-components">Veo3.1 Components (三图)</MenuItem>,
-                                <MenuItem key="veo3.1" value="veo3.1">Veo3.1 (首尾帧)</MenuItem>,
-                                <MenuItem key="veo3.1-pro" value="veo3.1-pro">Veo3.1 Pro (首尾帧)</MenuItem>
-                              ]}
-                            </Select>
-                          </FormControl>
-                        </>
-                      ) : currentModule === 'sora' ? (
-                        /* Sora 表单字段 */
-                        <>
-                          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-                            <Typography variant="caption" color="text.secondary">Reference Image (参考图片 - 必填)</Typography>
-                            <Box sx={{ width: 110, position: 'relative' }}>
+                    {currentModule === 'veo' ? (
+                      /* Veo 表单字段 */
+                      <>
+                        {/* 仅当模型支持图片输入时显示 (veo2-fast-frames 或 veo3 系列 或 veo3+ 系列) */}
+                        {(selectedModel === 'veo2-fast-frames' || selectedModel.startsWith('veo3')) && (
+                          <>
+                            {/* 上传框并行显示：首帧、尾帧、中间帧 */}
+                            <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+                              {/* 本地上传：首帧 Image 1 */}
+                              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, width: 110 }}>
+                                <Typography variant="caption" color="text.secondary">参考图1</Typography>
                                 <Button
                                   variant="outlined"
                                   component="label"
-                                  disabled={uploadingSora}
+                                  disabled={uploading1}
                                   sx={{
                                     width: '100%',
                                     aspectRatio: '1/1',
@@ -1192,127 +1190,194 @@ const HomePage = () => {
                                     overflow: 'hidden',
                                     p: 0,
                                     '&:hover': {
-                                      border: '2px dashed #10b981',
-                                      bgcolor: 'rgba(16, 185, 129, 0.04)'
+                                      border: '2px dashed #2563eb',
+                                      bgcolor: 'rgba(37, 99, 235, 0.04)'
                                     }
                                   }}
                                 >
-                                  {soraUrl ? (
+                                  {image1 ? (
                                     <Box
                                       component="img"
-                                      src={soraUrl}
-                                      alt="参考图预览"
+                                      src={image1}
+                                      alt="首帧预览"
                                       sx={{ width: '100%', height: '100%', objectFit: 'cover' }}
                                     />
                                   ) : (
                                     <>
-                                      {uploadingSora ? (
-                                        <CircularProgress size={24} sx={{ color: '#10b981' }} />
+                                      {uploading1 ? (
+                                        <CircularProgress size={24} />
                                       ) : (
                                         <AddPhotoAlternateIcon sx={{ fontSize: 32, mb: 0.5, color: '#cbd5e1' }} />
                                       )}
                                       <Typography variant="caption" sx={{ color: '#64748b', fontSize: '0.7rem' }}>
-                                        {uploadingSora ? '上传中...' : '上传图片'}
+                                        {uploading1 ? '上传中...' : '上传图片'}
                                       </Typography>
                                     </>
                                   )}
                                   <input type="file" accept="image/*" hidden onChange={async (e) => {
                                     const file = e.target.files?.[0];
                                     if (!file) return;
-                                    setUploadingSora(true);
+                                    setUploading1(true);
                                     try {
                                       const url = await uploadToSupabase(file);
-                                      setSoraUrl(url);
-                                      setSnackbarMsg('参考图上传成功');
+                                      setImage1(url);
+                                      setSnackbarMsg('首帧图片上传成功');
                                       setSnackbarOpen(true);
                                     } catch (err: any) {
-                                      setSnackbarMsg(err.message || '上传失败');
+                                      setSnackbarMsg(err.message || '首帧上传失败');
                                       setSnackbarOpen(true);
                                     } finally {
-                                      setUploadingSora(false);
+                                      setUploading1(false);
                                       e.target.value = '';
                                     }
                                   }} />
                                 </Button>
-                                {soraUrl && (
-                                    <IconButton 
-                                        size="small" 
-                                        onClick={(e) => {
-                                            e.preventDefault();
-                                            setSoraUrl('');
-                                        }}
-                                        sx={{ 
-                                            position: 'absolute', 
-                                            top: 2, 
-                                            right: 2, 
-                                            bgcolor: 'rgba(0,0,0,0.5)', 
-                                            color: 'white', 
-                                            p: 0.25,
-                                            '&:hover': { bgcolor: 'rgba(0,0,0,0.7)' }
-                                        }}
-                                    >
-                                        <CloseIcon sx={{ fontSize: 14 }} />
-                                    </IconButton>
-                                )}
+                              </Box>
+
+                              {/* 本地上传：尾帧 Image 2 */}
+                              {selectedModel !== 'veo3-pro-frames' && (
+                                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, width: 110 }}>
+                                  <Typography variant="caption" color="text.secondary">参考图2</Typography>
+                                  <Button
+                                    variant="outlined"
+                                    component="label"
+                                    disabled={uploading2}
+                                    sx={{
+                                      width: '100%',
+                                      aspectRatio: '1/1',
+                                      display: 'flex',
+                                      flexDirection: 'column',
+                                      alignItems: 'center',
+                                      justifyContent: 'center',
+                                      border: '2px dashed #e2e8f0',
+                                      borderRadius: 2,
+                                      color: 'text.secondary',
+                                      overflow: 'hidden',
+                                      p: 0,
+                                      '&:hover': {
+                                        border: '2px dashed #2563eb',
+                                        bgcolor: 'rgba(37, 99, 235, 0.04)'
+                                      }
+                                    }}
+                                  >
+                                    {image2 ? (
+                                      <Box
+                                        component="img"
+                                        src={image2}
+                                        alt="尾帧预览"
+                                        sx={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                                      />
+                                    ) : (
+                                      <>
+                                        {uploading2 ? (
+                                          <CircularProgress size={24} />
+                                        ) : (
+                                          <AddPhotoAlternateIcon sx={{ fontSize: 32, mb: 0.5, color: '#cbd5e1' }} />
+                                        )}
+                                        <Typography variant="caption" sx={{ color: '#64748b', fontSize: '0.7rem' }}>
+                                          {uploading2 ? '上传中...' : '上传图片'}
+                                        </Typography>
+                                      </>
+                                    )}
+                                    <input type="file" accept="image/*" hidden onChange={async (e) => {
+                                      const file = e.target.files?.[0];
+                                      if (!file) return;
+                                      setUploading2(true);
+                                      try {
+                                        const url = await uploadToSupabase(file);
+                                        setImage2(url);
+                                        setSnackbarMsg('尾帧图片上传成功');
+                                        setSnackbarOpen(true);
+                                      } catch (err: any) {
+                                        setSnackbarMsg(err.message || '尾帧上传失败');
+                                        setSnackbarOpen(true);
+                                      } finally {
+                                        setUploading2(false);
+                                        e.target.value = '';
+                                      }
+                                    }} />
+                                  </Button>
+                                </Box>
+                              )}
+
+                              {/* 本地上传：中间帧 Image 3 */}
+                              {selectedModel === 'veo3.1-components' && (
+                                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, width: 110 }}>
+                                  <Typography variant="caption" color="text.secondary">参考图3</Typography>
+                                  <Button
+                                    variant="outlined"
+                                    component="label"
+                                    disabled={uploading3}
+                                    sx={{
+                                      width: '100%',
+                                      aspectRatio: '1/1',
+                                      display: 'flex',
+                                      flexDirection: 'column',
+                                      alignItems: 'center',
+                                      justifyContent: 'center',
+                                      border: '2px dashed #e2e8f0',
+                                      borderRadius: 2,
+                                      color: 'text.secondary',
+                                      overflow: 'hidden',
+                                      p: 0,
+                                      '&:hover': {
+                                        border: '2px dashed #2563eb',
+                                        bgcolor: 'rgba(37, 99, 235, 0.04)'
+                                      }
+                                    }}
+                                  >
+                                    {image3 ? (
+                                      <Box
+                                        component="img"
+                                        src={image3}
+                                        alt="中间帧预览"
+                                        sx={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                                      />
+                                    ) : (
+                                      <>
+                                        {uploading3 ? (
+                                          <CircularProgress size={24} />
+                                        ) : (
+                                          <AddPhotoAlternateIcon sx={{ fontSize: 32, mb: 0.5, color: '#cbd5e1' }} />
+                                        )}
+                                        <Typography variant="caption" sx={{ color: '#64748b', fontSize: '0.7rem' }}>
+                                          {uploading3 ? '上传中...' : '上传图片'}
+                                        </Typography>
+                                      </>
+                                    )}
+                                    <input type="file" accept="image/*" hidden onChange={async (e) => {
+                                      const file = e.target.files?.[0];
+                                      if (!file) return;
+                                      setUploading3(true);
+                                      try {
+                                        const url = await uploadToSupabase(file);
+                                        setImage3(url);
+                                        setSnackbarMsg('中间帧图片上传成功');
+                                        setSnackbarOpen(true);
+                                      } catch (err: any) {
+                                        setSnackbarMsg(err.message || '中间帧上传失败');
+                                        setSnackbarOpen(true);
+                                      } finally {
+                                        setUploading3(false);
+                                        e.target.value = '';
+                                      }
+                                    }} />
+                                  </Button>
+                                </Box>
+                              )}
                             </Box>
-                          </Box>
 
-                          <Grid container spacing={2}>
-                            <Grid size={6}>
-                              <FormControl fullWidth size="small">
-                                <InputLabel>Aspect Ratio</InputLabel>
-                                <Select
-                                  value={aspectRatio}
-                                  label="Aspect Ratio"
-                                  onChange={(e) => setAspectRatio(e.target.value)}
-                                >
-                                  <MenuItem value="9:16">Portrait (9:16)</MenuItem>
-                                  <MenuItem value="16:9">Cinema (16:9)</MenuItem>
-                                </Select>
-                              </FormControl>
-                            </Grid>
-                            <Grid size={6}>
-                              <FormControl fullWidth size="small">
-                                <InputLabel>Duration (Seconds)</InputLabel>
-                                <Select
-                                  value={duration}
-                                  label="Duration (Seconds)"
-                                  onChange={(e) => setDuration(Number(e.target.value))}
-                                >
-                                  <MenuItem value={10}>10s</MenuItem>
-                                  <MenuItem value={15}>15s</MenuItem>
-                                </Select>
-                              </FormControl>
-                            </Grid>
-                          </Grid>
+                            <Typography variant="caption" color="text.secondary">
+                              {selectedModel === 'veo3-pro-frames'
+                                ? '* 仅支持上传一张图片作为参考。'
+                                : selectedModel === 'veo3.1-components'
+                                  ? '* 支持上传最多三张图片作为参考。'
+                                  : '* 只传一张图片作为首帧参考，传两张则分别为首帧和尾帧。（veo2-fast-frames 支持本地上传）'}
+                            </Typography>
+                          </>
+                        )}
 
-                          <FormControl fullWidth size="small">
-                            <InputLabel>Size (Quality)</InputLabel>
-                            <Select
-                              value={size}
-                              label="Size (Quality)"
-                              onChange={(e) => setSize(e.target.value)}
-                            >
-                              <MenuItem value="small">Small (Standard)</MenuItem>
-                              <MenuItem value="large">Large (HD)</MenuItem>
-                            </Select>
-                          </FormControl>
-                        </>
-                      ) : (
-                        /* Nano Banana 表单字段 */
-                        <>
-                           <FormControl fullWidth size="small">
-                            <InputLabel>Model</InputLabel>
-                            <Select
-                              value={nanoModel}
-                              label="Model"
-                              onChange={(e) => setNanoModel(e.target.value)}
-                            >
-                              <MenuItem value="nano-banana-2">Nano Banana 2</MenuItem>
-                              <MenuItem value="nano-banana">Nano Banana</MenuItem>
-                            </Select>
-                          </FormControl>
-
+                        <Box display="flex" gap={2}>
                           <FormControl fullWidth size="small">
                             <InputLabel>Aspect Ratio</InputLabel>
                             <Select
@@ -1320,383 +1385,644 @@ const HomePage = () => {
                               label="Aspect Ratio"
                               onChange={(e) => setAspectRatio(e.target.value)}
                             >
-                              <MenuItem value="16:9">16:9</MenuItem>
-                              <MenuItem value="9:16">9:16</MenuItem>
-                              <MenuItem value="1:1">1:1</MenuItem>
-                              <MenuItem value="4:3">4:3</MenuItem>
-                              <MenuItem value="3:4">3:4</MenuItem>
+                              <MenuItem value="16:9">Cinema (16:9)</MenuItem>
+                              <MenuItem value="9:16">Portrait (9:16)</MenuItem>
                             </Select>
                           </FormControl>
+                        </Box>
 
-                          {nanoModel === 'nano-banana-2' && (
-                             <FormControl fullWidth size="small">
-                              <InputLabel>Image Size</InputLabel>
-                              <Select
-                                value={nanoImageSize}
-                                label="Image Size"
-                                onChange={(e) => setNanoImageSize(e.target.value)}
-                              >
-                                <MenuItem value="1K">1K</MenuItem>
-                                <MenuItem value="2K">2K</MenuItem>
-                                <MenuItem value="4K">4K</MenuItem>
-                              </Select>
-                            </FormControl>
-                          )}
-                          
-                          <Box>
-                            <Typography variant="caption" color="text.secondary" sx={{ mb: 1, display: 'block' }}>参考图 (Reference Images)</Typography>
-                            
-                            {/* 上传按钮：大正方形，图片列表在下方 */}
-                            <Box>
-                                {/* 上传按钮 */}
-                                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, width: 110, mb: 1 }}>
-                                  <Button
-                                    variant="outlined"
-                                    component="label"
-                                    disabled={uploadingNano}
-                                    sx={{
-                                        width: '100%',
-                                        aspectRatio: '1/1',
-                                        display: 'flex',
-                                        flexDirection: 'column',
-                                        alignItems: 'center',
-                                        justifyContent: 'center',
-                                        border: '2px dashed #e2e8f0',
-                                        borderRadius: 2,
-                                        color: 'text.secondary',
-                                        overflow: 'hidden',
-                                        p: 0,
-                                        '&:hover': {
-                                            border: '2px dashed #f59e0b',
-                                            bgcolor: 'rgba(245, 158, 11, 0.04)'
-                                        }
-                                    }}
-                                  >
-                                    {uploadingNano ? (
-                                        <CircularProgress size={24} sx={{ color: '#f59e0b' }} />
-                                    ) : (
-                                        <>
-                                          <AddPhotoAlternateIcon sx={{ fontSize: 32, mb: 0.5, color: '#cbd5e1' }} />
-                                          <Typography variant="caption" sx={{ color: '#64748b', fontSize: '0.7rem' }}>
-                                            上传图片
-                                          </Typography>
-                                        </>
-                                    )}
-                                    <input type="file" accept="image/*" hidden onChange={async (e) => {
-                                        const file = e.target.files?.[0];
-                                        if (!file) return;
-                                        setUploadingNano(true);
-                                        try {
-                                            const url = await uploadToSupabase(file);
-                                            setNanoImages([...nanoImages, url]);
-                                            setSnackbarMsg('参考图上传成功');
-                                            setSnackbarOpen(true);
-                                        } catch (err: any) {
-                                            setSnackbarMsg(err.message || '上传失败');
-                                            setSnackbarOpen(true);
-                                        } finally {
-                                            setUploadingNano(false);
-                                            e.target.value = '';
-                                        }
-                                    }} />
-                                  </Button>
-                                </Box>
-
-                                {/* 图片列表：下方小图 */}
-                                <Box display="flex" flexWrap="wrap" gap={1}>
-                                    {nanoImages.map((img, idx) => (
-                                        <Box key={idx} sx={{ 
-                                            position: 'relative', 
-                                            width: 60, 
-                                            height: 60, 
-                                            borderRadius: 1, 
-                                            overflow: 'hidden', 
-                                            border: '1px solid #e2e8f0',
-                                            '&:hover .delete-btn': { opacity: 1 }
-                                        }}>
-                                            <Box component="img" src={img} sx={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                                            <IconButton 
-                                                className="delete-btn"
-                                                size="small" 
-                                                onClick={() => {
-                                                    const newImages = [...nanoImages];
-                                                    newImages.splice(idx, 1);
-                                                    setNanoImages(newImages);
-                                                }}
-                                                sx={{ 
-                                                    position: 'absolute', 
-                                                    top: 2, 
-                                                    right: 2, 
-                                                    bgcolor: 'rgba(0,0,0,0.5)', 
-                                                    color: 'white', 
-                                                    p: 0.25,
-                                                    opacity: 0,
-                                                    transition: 'opacity 0.2s',
-                                                    '&:hover': { bgcolor: 'rgba(0,0,0,0.7)' }
-                                                }}
-                                            >
-                                                <CloseIcon sx={{ fontSize: 14 }} />
-                                            </IconButton>
-                                        </Box>
-                                    ))}
-                                </Box>
-                            </Box>
-                          </Box>
-                        </>
-                      )}
-
-                      <Box display="flex" justifyContent="space-between" alignItems="center" mt="auto" pb={2}>
-                        <Button 
-                          variant="outlined" 
-                          onClick={() => {
-                            setPrompt('');
-                            setImage1('');
-                            setImage2('');
-                            setImage3('');
-                            setSoraUrl('');
-                            setNanoImages([]);
-                          }}
-                        >
-                          Clear
-                        </Button>
-                        <Button 
-                          variant="contained" 
-                          size="large"
-                          onClick={handleGenerate}
-                          disabled={isGenerating}
-                          startIcon={isGenerating ? <CircularProgress size={20} color="inherit" /> : <PlayCircleOutlineIcon />}
-                          sx={{ 
-                            px: 4,
-                            background: 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)',
-                            boxShadow: '0 4px 12px rgba(37,99,235,0.3)'
-                          }}
-                        >
-                          {isGenerating ? 'Generating...' : 'Generate'}
-                        </Button>
-                      </Box>
-                    </Box>
-                  </Box>
-                  {/* 右侧结果区域：统一的大容器，包含大图预览和历史记录 */}
-                  <Box sx={{ 
-                    flex: 1, 
-                    display: 'flex', 
-                    flexDirection: 'column', 
-                    mr: { xs: 0, lg: 3 }, 
-                    height: 'calc(100vh - 200px)', 
-                    minHeight: 600,
-                    bgcolor: '#0f172a', 
-                    color: 'white', 
-                    borderRadius: 1, 
-                    p: 2,
-                    overflowY: 'auto', // 整个区域可滚动
-                    position: 'relative'
-                  }}>
-                    
-                    {/* 统一结果展示区域：Grid 布局 */}
-                    <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr', lg: '1fr 1fr 1fr' }, gap: 2 }}>
-                      {/* 1. 当前生成任务 (非队列模式) */}
-                      {(isGenerating || generationResult) && (
-                        <Box sx={{ position: 'relative' }}>
-                          <Box sx={{ 
-                            height: 120, 
-                            borderRadius: 1, 
-                            overflow: 'hidden', 
-                            position: 'relative', 
-                            display: 'flex', 
-                            alignItems: 'center', 
-                            justifyContent: 'center', 
-                            bgcolor: '#1e293b', 
-                            border: '1px solid rgba(255,255,255,0.06)',
-                            '&:hover .model-tag': { opacity: 1 }
-                          }}>
-                            {/* 模型标签 */}
-                            {(generatingModelRef.current || generationResult?._model) && (
-                              <Chip 
-                                className="model-tag"
-                                label={isGenerating ? generatingModelRef.current : generationResult?._model} 
-                                size="small" 
-                                sx={{ 
-                                  position: 'absolute', 
-                                  top: 8, 
-                                  left: 8, 
-                                  zIndex: 2, 
-                                  bgcolor: 'rgba(0,0,0,0.6)', 
-                                  color: 'white', 
-                                  backdropFilter: 'blur(4px)',
-                                  height: 20,
-                                  borderRadius: '4px',
-                                  opacity: 0,
-                                  transition: 'opacity 0.2s',
-                                  '& .MuiChip-label': { px: 0.8, fontSize: '0.7rem', fontWeight: 600 }
-                                }} 
-                              />
-                            )}
-                            
-                            {isGenerating ? (
-                              <Box
+                        {/* 模型选择（右侧表单控制，不联动左侧） */}
+                        <FormControl fullWidth size="small">
+                          <InputLabel>Model</InputLabel>
+                          <Select
+                            value={selectedModel}
+                            label="Model"
+                            onChange={(e) => setSelectedModel(e.target.value)}
+                          >
+                            {activeTab === 'veo2' ? [
+                              <MenuItem key="veo2" value="veo2">Veo2</MenuItem>,
+                              <MenuItem key="veo2-fast-frames" value="veo2-fast-frames">Veo2 Fast Frames</MenuItem>
+                            ] : activeTab === 'veo3' ? [
+                              <MenuItem key="veo3" value="veo3">Veo3</MenuItem>,
+                              <MenuItem key="veo3-fast" value="veo3-fast">Veo3 Fast</MenuItem>,
+                              <MenuItem key="veo3-frames" value="veo3-frames">Veo3 Frames</MenuItem>
+                            ] : [
+                              <MenuItem key="veo3-pro" value="veo3-pro">Veo3 Pro (首尾帧)</MenuItem>,
+                              <MenuItem key="veo3-pro-frames" value="veo3-pro-frames">Veo3 Pro Frames (单图)</MenuItem>,
+                              <MenuItem key="veo3.1-components" value="veo3.1-components">Veo3.1 Components (三图)</MenuItem>,
+                              <MenuItem key="veo3.1" value="veo3.1">Veo3.1 (首尾帧)</MenuItem>,
+                              <MenuItem key="veo3.1-pro" value="veo3.1-pro">Veo3.1 Pro (首尾帧)</MenuItem>
+                            ]}
+                          </Select>
+                        </FormControl>
+                      </>
+                    ) : currentModule === 'sora' ? (
+                      /* Sora 表单字段 */
+                      <>
+                        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                          <Typography variant="caption" color="text.secondary">Reference Image (参考图片 - 必填)</Typography>
+                          <Box sx={{ width: 110, position: 'relative' }}>
+                            <Button
+                              variant="outlined"
+                              component="label"
+                              disabled={uploadingSora}
+                              sx={{
+                                width: '100%',
+                                aspectRatio: '1/1',
+                                display: 'flex',
+                                flexDirection: 'column',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                border: '2px dashed #e2e8f0',
+                                borderRadius: 2,
+                                color: 'text.secondary',
+                                overflow: 'hidden',
+                                p: 0,
+                                '&:hover': {
+                                  border: '2px dashed #10b981',
+                                  bgcolor: 'rgba(16, 185, 129, 0.04)'
+                                }
+                              }}
+                            >
+                              {soraUrl ? (
+                                <Box
+                                  component="img"
+                                  src={soraUrl}
+                                  alt="参考图预览"
+                                  sx={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                                />
+                              ) : (
+                                <>
+                                  {uploadingSora ? (
+                                    <CircularProgress size={24} sx={{ color: '#10b981' }} />
+                                  ) : (
+                                    <AddPhotoAlternateIcon sx={{ fontSize: 32, mb: 0.5, color: '#cbd5e1' }} />
+                                  )}
+                                  <Typography variant="caption" sx={{ color: '#64748b', fontSize: '0.7rem' }}>
+                                    {uploadingSora ? '上传中...' : '上传图片'}
+                                  </Typography>
+                                </>
+                              )}
+                              <input type="file" accept="image/*" hidden onChange={async (e) => {
+                                const file = e.target.files?.[0];
+                                if (!file) return;
+                                setUploadingSora(true);
+                                try {
+                                  const url = await uploadToSupabase(file);
+                                  setSoraUrl(url);
+                                  setSnackbarMsg('参考图上传成功');
+                                  setSnackbarOpen(true);
+                                } catch (err: any) {
+                                  setSnackbarMsg(err.message || '上传失败');
+                                  setSnackbarOpen(true);
+                                } finally {
+                                  setUploadingSora(false);
+                                  e.target.value = '';
+                                }
+                              }} />
+                            </Button>
+                            {soraUrl && (
+                              <IconButton
+                                size="small"
+                                onClick={(e) => {
+                                  e.preventDefault();
+                                  setSoraUrl('');
+                                }}
                                 sx={{
-                                  position: 'relative',
-                                  width: '100%',
-                                  height: '100%',
-                                  display: 'flex',
-                                  alignItems: 'center',
-                                  justifyContent: 'center',
-                                  '&::after': {
-                                    content: '""',
-                                    position: 'absolute',
-                                    inset: 0,
-                                    background: 'linear-gradient(90deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0.08) 50%, rgba(255,255,255,0) 100%)',
-                                    transform: 'skewX(-20deg)',
-                                    animation: `${shine} 1.8s linear infinite`,
-                                  }
+                                  position: 'absolute',
+                                  top: 2,
+                                  right: 2,
+                                  bgcolor: 'rgba(0,0,0,0.5)',
+                                  color: 'white',
+                                  p: 0.25,
+                                  '&:hover': { bgcolor: 'rgba(0,0,0,0.7)' }
                                 }}
                               >
-                                <Typography
-                                  variant="subtitle2"
-                                  sx={{
-                                    position: 'relative',
-                                    zIndex: 1,
-                                    color: 'rgba(255,255,255,0.85)',
-                                    letterSpacing: 1,
-                                    animation: `${blink} 1.2s ease-in-out infinite`,
-                                  }}
-                                >
-                                  正在生成...
-                                </Typography>
-                              </Box>
-                            ) : (
-                              <>
-                                {generationResult.data && generationResult.data[0]?.url ? (
-                                  <img 
-                                    src={generationResult.data[0].url} 
-                                    style={{ height: '100%', width: '100%', objectFit: 'cover' }} 
-                                    alt="Generated"
-                                  />
-                                ) : (typeof generationResult?.data?.output === 'string') ? (
-                                  <video
-                                    onMouseEnter={(e) => e.currentTarget.controls = true}
-                                    onMouseLeave={(e) => e.currentTarget.controls = false}
-                                    autoPlay
-                                    loop
-                                    style={{ height: '100%', width: '100%', objectFit: 'cover' }}
-                                    src={generationResult.data.output}
-                                  />
-                                ) : generationResult.data?.video_url || generationResult.video_url ? (
-                                  <video
-                                    onMouseEnter={(e) => e.currentTarget.controls = true}
-                                    onMouseLeave={(e) => e.currentTarget.controls = false}
-                                    autoPlay
-                                    loop
-                                    style={{ height: '100%', width: '100%', objectFit: 'cover' }}
-                                    src={generationResult.data?.video_url || generationResult.video_url}
-                                  />
-                                ) : (
-                                  <Box textAlign="center" p={1}>
-                                    <Typography variant="caption" color="success.main">完成</Typography>
-                                  </Box>
-                                )}
-                              </>
+                                <CloseIcon sx={{ fontSize: 14 }} />
+                              </IconButton>
                             )}
                           </Box>
                         </Box>
-                      )}
 
-                      {/* 2. 历史记录卡片 (Veo模式下) */}
-                      {currentModule === 'veo' && jobs.map((job) => (
-                        <Box key={job.id} sx={{ position: 'relative' }}>
-                          <Box sx={{ 
-                            height: 120, 
-                            borderRadius: 1, 
-                            overflow: 'hidden', 
-                            position: 'relative', 
-                            display: 'flex', 
-                            alignItems: 'center', 
-                            justifyContent: 'center', 
-                            bgcolor: '#1e293b', 
-                            border: '1px solid rgba(255,255,255,0.06)',
-                            '&:hover .model-tag': { opacity: 1 }
-                          }}>
-                            {/* 模型标签 */}
-                            <Chip 
+                        <Grid container spacing={2}>
+                          <Grid size={6}>
+                            <FormControl fullWidth size="small">
+                              <InputLabel>Aspect Ratio</InputLabel>
+                              <Select
+                                value={aspectRatio}
+                                label="Aspect Ratio"
+                                onChange={(e) => setAspectRatio(e.target.value)}
+                              >
+                                <MenuItem value="9:16">Portrait (9:16)</MenuItem>
+                                <MenuItem value="16:9">Cinema (16:9)</MenuItem>
+                              </Select>
+                            </FormControl>
+                          </Grid>
+                          <Grid size={6}>
+                            <FormControl fullWidth size="small">
+                              <InputLabel>Duration (Seconds)</InputLabel>
+                              <Select
+                                value={duration}
+                                label="Duration (Seconds)"
+                                onChange={(e) => setDuration(Number(e.target.value))}
+                              >
+                                <MenuItem value={10}>10s</MenuItem>
+                                <MenuItem value={15}>15s</MenuItem>
+                              </Select>
+                            </FormControl>
+                          </Grid>
+                        </Grid>
+
+                        <FormControl fullWidth size="small">
+                          <InputLabel>Size (Quality)</InputLabel>
+                          <Select
+                            value={size}
+                            label="Size (Quality)"
+                            onChange={(e) => setSize(e.target.value)}
+                          >
+                            <MenuItem value="small">Small (Standard)</MenuItem>
+                            <MenuItem value="large">Large (HD)</MenuItem>
+                          </Select>
+                        </FormControl>
+                      </>
+                    ) : (
+                      /* Nano Banana 表单字段 */
+                      <>
+                        <FormControl fullWidth size="small">
+                          <InputLabel>Model</InputLabel>
+                          <Select
+                            value={nanoModel}
+                            label="Model"
+                            onChange={(e) => setNanoModel(e.target.value)}
+                          >
+                            <MenuItem value="nano-banana-2">Nano Banana 2</MenuItem>
+                            <MenuItem value="nano-banana">Nano Banana</MenuItem>
+                          </Select>
+                        </FormControl>
+
+                        <FormControl fullWidth size="small">
+                          <InputLabel>Aspect Ratio</InputLabel>
+                          <Select
+                            value={aspectRatio}
+                            label="Aspect Ratio"
+                            onChange={(e) => setAspectRatio(e.target.value)}
+                          >
+                            <MenuItem value="16:9">16:9</MenuItem>
+                            <MenuItem value="9:16">9:16</MenuItem>
+                            <MenuItem value="1:1">1:1</MenuItem>
+                            <MenuItem value="4:3">4:3</MenuItem>
+                            <MenuItem value="3:4">3:4</MenuItem>
+                          </Select>
+                        </FormControl>
+
+                        {nanoModel === 'nano-banana-2' && (
+                          <FormControl fullWidth size="small">
+                            <InputLabel>Image Size</InputLabel>
+                            <Select
+                              value={nanoImageSize}
+                              label="Image Size"
+                              onChange={(e) => setNanoImageSize(e.target.value)}
+                            >
+                              <MenuItem value="1K">1K</MenuItem>
+                              <MenuItem value="2K">2K</MenuItem>
+                              <MenuItem value="4K">4K</MenuItem>
+                            </Select>
+                          </FormControl>
+                        )}
+
+                        <Box>
+                          <Typography variant="caption" color="text.secondary" sx={{ mb: 1, display: 'block' }}>参考图 (Reference Images)</Typography>
+
+                          {/* 上传按钮：大正方形，图片列表在下方 */}
+                          <Box>
+                            {/* 上传按钮 */}
+                            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, width: 110, mb: 1 }}>
+                              <Button
+                                variant="outlined"
+                                component="label"
+                                disabled={uploadingNano}
+                                sx={{
+                                  width: '100%',
+                                  aspectRatio: '1/1',
+                                  display: 'flex',
+                                  flexDirection: 'column',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  border: '2px dashed #e2e8f0',
+                                  borderRadius: 2,
+                                  color: 'text.secondary',
+                                  overflow: 'hidden',
+                                  p: 0,
+                                  '&:hover': {
+                                    border: '2px dashed #f59e0b',
+                                    bgcolor: 'rgba(245, 158, 11, 0.04)'
+                                  }
+                                }}
+                              >
+                                {uploadingNano ? (
+                                  <CircularProgress size={24} sx={{ color: '#f59e0b' }} />
+                                ) : (
+                                  <>
+                                    <AddPhotoAlternateIcon sx={{ fontSize: 32, mb: 0.5, color: '#cbd5e1' }} />
+                                    <Typography variant="caption" sx={{ color: '#64748b', fontSize: '0.7rem' }}>
+                                      上传图片
+                                    </Typography>
+                                  </>
+                                )}
+                                <input type="file" accept="image/*" hidden onChange={async (e) => {
+                                  const file = e.target.files?.[0];
+                                  if (!file) return;
+                                  setUploadingNano(true);
+                                  try {
+                                    const url = await uploadToSupabase(file);
+                                    setNanoImages([...nanoImages, url]);
+                                    setSnackbarMsg('参考图上传成功');
+                                    setSnackbarOpen(true);
+                                  } catch (err: any) {
+                                    setSnackbarMsg(err.message || '上传失败');
+                                    setSnackbarOpen(true);
+                                  } finally {
+                                    setUploadingNano(false);
+                                    e.target.value = '';
+                                  }
+                                }} />
+                              </Button>
+                            </Box>
+
+                            {/* 图片列表：下方小图 */}
+                            <Box display="flex" flexWrap="wrap" gap={1}>
+                              {nanoImages.map((img, idx) => (
+                                <Box key={idx} sx={{
+                                  position: 'relative',
+                                  width: 60,
+                                  height: 60,
+                                  borderRadius: 1,
+                                  overflow: 'hidden',
+                                  border: '1px solid #e2e8f0',
+                                  '&:hover .delete-btn': { opacity: 1 }
+                                }}>
+                                  <Box component="img" src={img} sx={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                                  <IconButton
+                                    className="delete-btn"
+                                    size="small"
+                                    onClick={() => {
+                                      const newImages = [...nanoImages];
+                                      newImages.splice(idx, 1);
+                                      setNanoImages(newImages);
+                                    }}
+                                    sx={{
+                                      position: 'absolute',
+                                      top: 2,
+                                      right: 2,
+                                      bgcolor: 'rgba(0,0,0,0.5)',
+                                      color: 'white',
+                                      p: 0.25,
+                                      opacity: 0,
+                                      transition: 'opacity 0.2s',
+                                      '&:hover': { bgcolor: 'rgba(0,0,0,0.7)' }
+                                    }}
+                                  >
+                                    <CloseIcon sx={{ fontSize: 14 }} />
+                                  </IconButton>
+                                </Box>
+                              ))}
+                            </Box>
+                          </Box>
+                        </Box>
+                      </>
+                    )}
+
+                    <Box display="flex" justifyContent="space-between" alignItems="center" mt="auto" pb={2}>
+                      <Button
+                        variant="outlined"
+                        onClick={() => {
+                          setPrompt('');
+                          setImage1('');
+                          setImage2('');
+                          setImage3('');
+                          setSoraUrl('');
+                          setNanoImages([]);
+                        }}
+                      >
+                        Clear
+                      </Button>
+                      <Button
+                        variant="contained"
+                        size="large"
+                        onClick={handleGenerate}
+                        disabled={isGenerating}
+                        startIcon={isGenerating ? <CircularProgress size={20} color="inherit" /> : <PlayCircleOutlineIcon />}
+                        sx={{
+                          px: 4,
+                          background: 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)',
+                          boxShadow: '0 4px 12px rgba(37,99,235,0.3)'
+                        }}
+                      >
+                        {isGenerating ? 'Generating...' : 'Generate'}
+                      </Button>
+                    </Box>
+                  </Box>
+                </Box>
+                {/* 右侧结果区域：统一的大容器，包含大图预览和历史记录 */}
+                <Box sx={{
+                  flex: 1,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  mr: { xs: 0, lg: 3 },
+                  height: 'calc(100vh - 200px)',
+                  minHeight: 600,
+                  bgcolor: '#0f172a',
+                  color: 'white',
+                  borderRadius: 1,
+                  p: 2,
+                  overflowY: 'auto', // 整个区域可滚动
+                  position: 'relative'
+                }}>
+
+                  {/* 统一结果展示区域：Grid 布局 */}
+                  <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr', lg: '1fr 1fr 1fr' }, gap: 2 }}>
+                    {/* 1. 当前生成任务或最近成功任务（跨模块显示） */}
+                    {(() => {
+                      // 计算最近一个可展示的视频：优先当前 generationResult；否则最近成功的队列任务
+                      const latestSucceededJob = jobs.find(j => j.status === 'succeeded' && j.result?.video_url);
+                      const hasCurrent = Boolean(generationResult);
+                      const videoSrcStr = hasCurrent
+                        ? (typeof generationResult?.data?.output === 'string')
+                          ? generationResult.data.output
+                          : (generationResult?.data?.video_url || generationResult?.video_url)
+                        : latestSucceededJob?.result?.video_url;
+                      const showCard = isGenerating || hasCurrent || Boolean(videoSrcStr);
+                      if (!showCard) return null;
+                      const modelLabel = isGenerating
+                        ? generatingModelRef.current
+                        : (generationResult?._model || latestSucceededJob?.model || '');
+                      return (
+                      <Box sx={{ position: 'relative' }}>
+                        <Box sx={{
+                          height: 120,
+                          borderRadius: 1,
+                          overflow: 'hidden',
+                          position: 'relative',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          bgcolor: '#1e293b',
+                          border: '1px solid rgba(255,255,255,0.06)',
+                          '&:hover .model-tag': { opacity: 1 },
+                          '&:hover .delete-btn': { opacity: 1 }
+                        }}>
+                          {/* 当前结果卡片的删除按钮（右上角方形，悬浮变色） */}
+                          <IconButton
+                            className="delete-btn"
+                            aria-label="删除"
+                            onClick={() => {
+                              // 清空当前结果展示
+                              setGenerationResult(null);
+                            }}
+                            sx={{
+                              position: 'absolute',
+                              top: 6,
+                              right: 6,
+                              width: 26,
+                              height: 26,
+                              borderRadius: 1,
+                              bgcolor: 'rgba(0,0,0,0.5)',
+                              color: 'white',
+                              border: '1px solid rgba(255,255,255,0.2)',
+                              zIndex: 3,
+                              opacity: 0,
+                              transition: 'all 0.2s ease',
+                              '&:hover': {
+                                bgcolor: 'rgba(239,68,68,0.8)',
+                                borderColor: 'rgba(255,255,255,0.35)'
+                              }
+                            }}
+                          >
+                            <CloseIcon sx={{ fontSize: 16 }} />
+                          </IconButton>
+                          {/* 模型标签 */}
+                          {modelLabel && (
+                            <Chip
                               className="model-tag"
-                              label={job.model} 
-                              size="small" 
-                              sx={{ 
-                                position: 'absolute', 
-                                top: 8, 
-                                left: 8, 
-                                zIndex: 2, 
-                                bgcolor: 'rgba(0,0,0,0.6)', 
-                                color: 'white', 
+                              label={modelLabel}
+                              size="small"
+                              sx={{
+                                position: 'absolute',
+                                top: 8,
+                                left: 8,
+                                zIndex: 2,
+                                bgcolor: 'rgba(0,0,0,0.6)',
+                                color: 'white',
                                 backdropFilter: 'blur(4px)',
                                 height: 20,
                                 borderRadius: '4px',
                                 opacity: 0,
                                 transition: 'opacity 0.2s',
                                 '& .MuiChip-label': { px: 0.8, fontSize: '0.7rem', fontWeight: 600 }
-                              }} 
+                              }}
                             />
+                          )}
 
-                            {job.result?.video_url ? (
-                              <video 
-                                onMouseEnter={(e) => e.currentTarget.controls = true}
-                                onMouseLeave={(e) => e.currentTarget.controls = false}
-                                style={{ height: '100%', width: '100%', objectFit: 'cover' }} 
-                                src={job.result.video_url} 
-                              />
-                            ) : job.result?.image_url ? (
-                              <img src={job.result.image_url} alt="result" style={{ height: '100%', width: '100%', objectFit: 'cover' }} />
-                            ) : (
-                              <Box
+                          {isGenerating ? (
+                            <Box
+                              sx={{
+                                position: 'relative',
+                                width: '100%',
+                                height: '100%',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                '&::after': {
+                                  content: '""',
+                                  position: 'absolute',
+                                  inset: 0,
+                                  background: 'linear-gradient(90deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0.08) 50%, rgba(255,255,255,0) 100%)',
+                                  transform: 'skewX(-20deg)',
+                                  animation: `${shine} 1.8s linear infinite`,
+                                }
+                              }}
+                            >
+                              <Typography
+                                variant="subtitle2"
                                 sx={{
                                   position: 'relative',
-                                  width: '100%',
-                                  height: '100%',
-                                  display: 'flex',
-                                  alignItems: 'center',
-                                  justifyContent: 'center',
-                                  '&::after': {
-                                    content: '""',
-                                    position: 'absolute',
-                                    inset: 0,
-                                    background: 'linear-gradient(90deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0.08) 50%, rgba(255,255,255,0) 100%)',
-                                    transform: 'skewX(-20deg)',
-                                    animation: `${shine} 1.8s linear infinite`,
-                                  }
+                                  zIndex: 1,
+                                  color: 'rgba(255,255,255,0.85)',
+                                  letterSpacing: 1,
+                                  animation: `${blink} 1.2s ease-in-out infinite`,
                                 }}
                               >
-                                <Typography
-                                  variant="subtitle2"
-                                  sx={{
-                                    position: 'relative',
-                                    zIndex: 1,
-                                    color: 'rgba(255,255,255,0.85)',
-                                    letterSpacing: 1,
-                                    animation: `${blink} 1.2s ease-in-out infinite`,
-                                  }}
-                                >
-                                  正在生成...
-                                </Typography>
-                              </Box>
-                            )}
-                          </Box>
+                                正在生成...
+                              </Typography>
+                            </Box>
+                          ) : (
+                            <>
+                              {generationResult?.data && generationResult.data[0]?.url ? (
+                                <img
+                                  src={generationResult.data[0].url}
+                                  style={{ height: '100%', width: '100%', objectFit: 'cover' }}
+                                  alt="Generated"
+                                />
+                              ) : videoSrcStr ? (
+                                <VideoWithLoader style={{ height: '100%', width: '100%', objectFit: 'cover' }} src={videoSrcStr} />
+                              ) : (
+                                <Box textAlign="center" p={1}>
+                                  <Typography variant="caption" color="success.main">完成</Typography>
+                                </Box>
+                              )}
+                            </>
+                          )}
                         </Box>
-                      ))}
-                    </Box>
-
-                    {/* 3. Empty State (既没生成，也没历史) */}
-                    {!isGenerating && !generationResult && (!jobs || jobs.length === 0) && (
-                      <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', opacity: 0.5, minHeight: 400 }}>
-                        <MovieCreationIcon sx={{ fontSize: 64, mb: 1 }} />
-                        <Typography variant="subtitle1" fontWeight={700} letterSpacing={1}>RESULT</Typography>
-                        <Typography variant="caption">Your result will appear here</Typography>
                       </Box>
-                    )}
+                      );
+                    })()}
+
+                    {/* 2. 历史记录卡片（Veo/Sora 队列） */}
+                    {(currentModule === 'veo' || currentModule === 'sora') && !isGenerating && (() => {
+                      // 基于 URL 去重，避免同一视频/图片重复显示
+                      const seen = new Set<string>();
+                      // 当存在“当前生成卡片”时，避免列表再展示进行中的占位（queued/submitting/running）
+                      const isShowingCurrentCard = isGenerating || Boolean(generationResult);
+                      const deduped = jobs
+                        .filter(j => {
+                          if (isShowingCurrentCard && (j.status === 'queued' || j.status === 'submitting' || j.status === 'running')) {
+                            return false; // 进行中的占位交由“当前卡片”呈现，历史列表不再冗余展示
+                          }
+                          // 当当前卡片展示时，历史列表不再显示无结果的占位（即没有 video_url/image_url 的卡片）
+                          if (isShowingCurrentCard && !j.result?.video_url && !j.result?.image_url) {
+                            return false;
+                          }
+                          return true;
+                        })
+                        .filter(j => {
+                        const url = j.result?.video_url || j.result?.image_url || '';
+                          if (!url) return true; // 保留已完成但尚未解析到直链的记录（若存在）
+                        const key = String(url);
+                        if (seen.has(key)) return false;
+                        seen.add(key);
+                        return true;
+                      });
+                      return deduped.map((job) => (
+                      <Box key={job.id} sx={{ position: 'relative' }}>
+                          <Box sx={{
+                          height: 120,
+                          borderRadius: 1,
+                          overflow: 'hidden',
+                          position: 'relative',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          bgcolor: '#1e293b',
+                          border: '1px solid rgba(255,255,255,0.06)',
+                            '&:hover .model-tag': { opacity: 1 },
+                            '&:hover .delete-btn': { opacity: 1 }
+                        }}>
+                               {/* 删除按钮（右上角方形，悬浮变色） */}
+                           <IconButton
+                             className="delete-btn"
+                                 aria-label="删除"
+                                 onClick={() => setJobs(prev => prev.filter(j => j.id !== job.id))}
+                                 sx={{
+                                   position: 'absolute',
+                                   top: 6,
+                                   right: 6,
+                                   width: 26,
+                                   height: 26,
+                                   borderRadius: 1, // 方形
+                                   bgcolor: 'rgba(0,0,0,0.5)',
+                                   color: 'white',
+                                   border: '1px solid rgba(255,255,255,0.2)',
+                               zIndex: 3,
+                               opacity: 0,
+                                   transition: 'all 0.2s ease',
+                                   '&:hover': {
+                                     bgcolor: 'rgba(239,68,68,0.8)', // 红色高亮
+                                     borderColor: 'rgba(255,255,255,0.35)'
+                                   }
+                                 }}
+                               >
+                                 <CloseIcon sx={{ fontSize: 16 }} />
+                               </IconButton>
+                          {/* 模型标签 */}
+                          <Chip
+                            className="model-tag"
+                            label={job.module === 'sora' ? 'Sora2' : job.model}
+                            size="small"
+                            sx={{
+                              position: 'absolute',
+                              top: 8,
+                              left: 8,
+                              zIndex: 2,
+                              bgcolor: 'rgba(0,0,0,0.6)',
+                              color: 'white',
+                              backdropFilter: 'blur(4px)',
+                              height: 20,
+                              borderRadius: '4px',
+                              opacity: 0,
+                              transition: 'opacity 0.2s',
+                              '& .MuiChip-label': { px: 0.8, fontSize: '0.7rem', fontWeight: 600 }
+                            }}
+                          />
+
+                          {job.result?.video_url ? (
+                            <VideoWithLoader
+                              style={{ height: '100%', width: '100%', objectFit: 'cover' }}
+                              src={job.result.video_url}
+                            />
+                          ) : job.result?.image_url ? (
+                            <img src={job.result.image_url} alt="result" style={{ height: '100%', width: '100%', objectFit: 'cover' }} />
+                          ) : (
+                            <Box
+                              sx={{
+                                position: 'relative',
+                                width: '100%',
+                                height: '100%',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                '&::after': {
+                                  content: '""',
+                                  position: 'absolute',
+                                  inset: 0,
+                                  background: 'linear-gradient(90deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0.08) 50%, rgba(255,255,255,0) 100%)',
+                                  transform: 'skewX(-20deg)',
+                                  animation: `${shine} 1.8s linear infinite`,
+                                }
+                              }}
+                            >
+                              <Typography
+                                variant="subtitle2"
+                                sx={{
+                                  position: 'relative',
+                                  zIndex: 1,
+                                  color: 'rgba(255,255,255,0.85)',
+                                  letterSpacing: 1,
+                                  animation: `${blink} 1.2s ease-in-out infinite`,
+                                }}
+                              >
+                                正在生成...
+                              </Typography>
+                            </Box>
+                          )}
+                        </Box>
+                      </Box>
+                  ));
+                })()}
                   </Box>
+
+                  {/* 3. Empty State (既没生成，也没历史) */}
+                  {!isGenerating && !generationResult && (!jobs || jobs.length === 0) && (
+                    <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', opacity: 0.5, minHeight: 400 }}>
+                      <MovieCreationIcon sx={{ fontSize: 64, mb: 1 }} />
+                      <Typography variant="subtitle1" fontWeight={700} letterSpacing={1}>RESULT</Typography>
+                      <Typography variant="caption">Your result will appear here</Typography>
+                    </Box>
+                  )}
                 </Box>
-              </Paper>
+              </Box>
+            </Paper>
           </Box>
-        </Container>
+        </Box>
 
         <Snackbar
           open={snackbarOpen}

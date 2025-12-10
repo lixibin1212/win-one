@@ -145,7 +145,44 @@ COMMENT ON TABLE email_verifications IS '邮箱验证记录表';
 COMMENT ON TABLE password_resets IS '密码重置记录表';
 
 -- ============================================
--- 7. 初始化管理员账号（可选）
+-- 7. 生成记录表 (generations)
+-- 说明：记录每次生成任务的关键数据，便于前端历史展示与审计
+-- 字段：
+-- - task_id: 统一任务ID（veo2/veo3 由后端映射）
+-- - status: pending/running/succeeded/failed 等
+-- - video_url: 成功后的视频地址（后端查询时写入）
+-- - prompt: 用户输入的提示词
+-- - images: 如果前端上传了图片到 Supabase 并作为参考传入接口，这里记录公开URL列表
+-- - aspect_ratio: 生成时的画幅参数
+-- - model: 使用的具体模型（如 veo2、veo3-fast 等）
+-- - created_at/completed_at: 创建与完成时间
+DROP TABLE IF EXISTS generations;
+
+CREATE TABLE generations (
+    id BIGSERIAL PRIMARY KEY,
+    task_id VARCHAR(255) UNIQUE NOT NULL,
+    model VARCHAR(100) NOT NULL,
+    prompt TEXT NOT NULL,
+    images TEXT[] DEFAULT ARRAY[]::TEXT[],
+    aspect_ratio VARCHAR(20) DEFAULT '16:9',
+    status VARCHAR(50) DEFAULT 'pending' NOT NULL,
+    video_url TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    completed_at TIMESTAMP WITH TIME ZONE
+);
+
+CREATE INDEX idx_generations_task_id ON generations(task_id);
+CREATE INDEX idx_generations_status ON generations(status);
+CREATE INDEX idx_generations_model ON generations(model);
+CREATE INDEX idx_generations_created_at ON generations(created_at);
+
+COMMENT ON TABLE generations IS '生成记录表：记录每次生成任务的状态、结果与输入参数';
+COMMENT ON COLUMN generations.task_id IS '统一任务ID（后端按模型来源路由，字段统一）';
+COMMENT ON COLUMN generations.video_url IS '生成完成后的视频直链地址（成功时写入）';
+COMMENT ON COLUMN generations.images IS '参考图片的公开URL列表（如从 Supabase 上传返回）';
+
+-- ============================================
+-- 8. 初始化管理员账号（可选）
 -- ============================================
 -- 密码: Admin@123 (请务必修改)
 -- INSERT INTO users (username, email, password_hash, role, email_verified, is_active)

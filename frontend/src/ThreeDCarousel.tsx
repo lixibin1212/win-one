@@ -29,13 +29,13 @@ const ThreeDCarousel: React.FC = () => {
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [cellCount] = useState(12);
   const sceneRef = useRef<HTMLDivElement>(null);
-  
+
   // Configuration
   const cardWidth = 260; // Slightly smaller width to fit more cards
   const gap = 100; // Increased gap for more space between cards
   const effectiveWidth = cardWidth + gap;
   const radius = Math.round((effectiveWidth / 2) / Math.tan(Math.PI / cellCount));
-  
+
   const rotateCarousel = () => {
     const angle = (360 / cellCount) * selectedIndex * -1;
     if (sceneRef.current) {
@@ -73,7 +73,7 @@ const ThreeDCarousel: React.FC = () => {
           const angle = (360 / cellCount) * index;
           // Check if this card is the currently selected one (normalized)
           const isCurrent = index === normalizedIndex;
-          
+
           const handleCardClick = () => {
             let diff = index - normalizedIndex;
             // Shortest path logic
@@ -83,8 +83,8 @@ const ThreeDCarousel: React.FC = () => {
           };
 
           return (
-            <div 
-              key={item.id} 
+            <div
+              key={item.id}
               className={`carousel-card ${isCurrent ? 'active' : ''}`}
               style={{
                 transform: `rotateY(${angle}deg) translateZ(${radius}px)`,
@@ -115,8 +115,8 @@ const ThreeDCarousel: React.FC = () => {
 
       <div className="carousel-indicators">
         {defaultItems.map((_, index) => (
-          <div 
-            key={index} 
+          <div
+            key={index}
             className={`carousel-indicator ${index === normalizedIndex ? 'active' : ''}`}
             onClick={() => setSelectedIndex(selectedIndex - (normalizedIndex - index))}
           />

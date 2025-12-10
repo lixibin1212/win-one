@@ -1238,6 +1238,47 @@ async def nano_generate(req: NanoGenerateRequest, user = Depends(get_current_use
             
             data = resp.json()
             # Nano API 直接返回结果，不需要轮询
+            # 将同步结果写入 generations 表
+            try:
+                # 生成内部 task_id（nano-<随机>）
+                import uuid
+                task_id = f"nano-{uuid.uuid4().hex}"
+                # 提取图片/视频 URL（Nano 返回通常是图片列表或单一 url）
+                image_urls: list[str] = []
+                video_url = None
+                # 常见返回结构：{"data": [{"url": "..."}, ...]} 或 {"url": "..."}
+                if isinstance(data, dict):
+                    if isinstance(data.get("data"), list):
+                        for it in data["data"]:
+                            u = it.get("url") if isinstance(it, dict) else None
+                            if u:
+                                image_urls.append(u)
+                    elif data.get("url"):
+                        image_urls.append(data["url"])  # 统一当作图片URL
+                # 插入 succeeded 记录
+                with engine.connect() as conn:
+                    conn.execute(
+                        text(
+                            """
+                            INSERT INTO generations (task_id, model, prompt, images, aspect_ratio, status, video_url, created_at, completed_at)
+                            VALUES (:task_id, :model, :prompt, :images, :aspect_ratio, :status, :video_url, NOW(), NOW())
+                            """
+                        ),
+                        {
+                            "task_id": task_id,
+                            "model": req.model,
+                            "prompt": req.prompt,
+                            "images": image_urls,
+                            "aspect_ratio": req.aspect_ratio or "16:9",
+                            "status": "succeeded",
+                            "video_url": video_url,
+                        },
+                    )
+                    conn.commit()
+                # 将内部 task_id 回传，便于统一历史查询（可选）
+                data["task_id"] = task_id
+            except Exception as e:
+                logger.warning(f"Insert generations (nano) failed: {e}")
             return data
         except httpx.RequestError as e:
             logger.error(f"Nano Request Error: {e}")

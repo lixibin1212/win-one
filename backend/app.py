@@ -1108,8 +1108,30 @@ async def sora_generate(req: SoraGenerateRequest, user = Depends(get_current_use
             data = resp.json()
             if data.get("code") != 0:
                 raise HTTPException(status_code=400, detail=data.get("msg", "Unknown error"))
-            
-            return {"task_id": data["data"]["id"]}
+            task_id = data["data"]["id"]
+            # 记录到 generations（pending）
+            try:
+                with engine.connect() as conn:
+                    conn.execute(
+                        text(
+                            """
+                            INSERT INTO generations (task_id, model, prompt, images, aspect_ratio, status, created_at)
+                            VALUES (:task_id, :model, :prompt, :images, :aspect_ratio, :status, NOW())
+                            """
+                        ),
+                        {
+                            "task_id": task_id,
+                            "model": "sora2",
+                            "prompt": req.prompt,
+                            "images": [],
+                            "aspect_ratio": req.aspectRatio,
+                            "status": "pending",
+                        },
+                    )
+                    conn.commit()
+            except Exception as e:
+                logger.warning(f"Insert generations (sora) failed: {e}")
+            return {"task_id": task_id}
         except httpx.RequestError as e:
             logger.error(f"Sora Request Error: {e}")
             raise HTTPException(status_code=500, detail="Sora API 请求异常")
@@ -1143,8 +1165,39 @@ async def sora_result(task_id: str, user = Depends(get_current_user)):
             if status == "succeeded":
                 results = inner_data.get("results", [])
                 video_url = results[0].get("url") if results else None
+                # 更新 generations 成功记录
+                try:
+                    with engine.connect() as conn:
+                        conn.execute(
+                            text(
+                                """
+                                UPDATE generations
+                                SET status = 'succeeded', video_url = :video_url, completed_at = NOW()
+                                WHERE task_id = :task_id
+                                """
+                            ),
+                            {"video_url": video_url, "task_id": task_id},
+                        )
+                        conn.commit()
+                except Exception as e:
+                    logger.warning(f"Update generations (sora success) failed: {e}")
                 return {"status": "succeeded", "video_url": video_url, "raw": inner_data}
             elif status == "failed":
+                try:
+                    with engine.connect() as conn:
+                        conn.execute(
+                            text(
+                                """
+                                UPDATE generations
+                                SET status = 'failed', completed_at = NOW()
+                                WHERE task_id = :task_id
+                                """
+                            ),
+                            {"task_id": task_id},
+                        )
+                        conn.commit()
+                except Exception as e:
+                    logger.warning(f"Update generations (sora failed) failed: {e}")
                 return {"status": "failed", "error": inner_data.get("failure_reason")}
             else:
                 return {"status": "processing", "progress": inner_data.get("progress", 0)}

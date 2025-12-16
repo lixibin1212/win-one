@@ -5,19 +5,24 @@ import App from './App';
 import AuthOverlay from './AuthOverlay';
 import LandingPage from './LandingPage';
 import HomePage from './HomePage';
+import PricingPage from './PricingPage';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { AuthProvider } from './AuthContext';
 import { GoogleOAuthProvider } from '@react-oauth/google';
 
 const root = ReactDOM.createRoot(document.getElementById('root') as HTMLElement);
 const app = (
   <GoogleOAuthProvider clientId="247193530706-lscvo9tovkvdnj54e6ak15eum5ubgcbh.apps.googleusercontent.com">
-    <BrowserRouter>
-      <Routes>
-        <Route path="/" element={<LandingPage />} />
-        <Route path="/login" element={<AuthOverlay />} />
-        <Route path="/home" element={<HomePage />} />
-      </Routes>
-    </BrowserRouter>
+    <AuthProvider>
+      <BrowserRouter>
+        <Routes>
+          <Route path="/" element={<LandingPage />} />
+          <Route path="/login" element={<AuthOverlay />} />
+          <Route path="/home" element={<HomePage />} />
+          <Route path="/pricing" element={<PricingPage />} />
+        </Routes>
+      </BrowserRouter>
+    </AuthProvider>
   </GoogleOAuthProvider>
 );
 root.render(app as any);

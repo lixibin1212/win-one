@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Box, Button, Typography, Container, Paper, Chip, Divider, keyframes } from '@mui/material';
 import StarIcon from '@mui/icons-material/Star';
 import SchoolIcon from '@mui/icons-material/School';
+import SunAnimation from './SunAnimation';
 
 const borderRotate = keyframes`
   0% { background-position: 0% 50%; }
@@ -59,18 +60,10 @@ const LandingPage = () => {
             fontSize: { xs: '16px', md: '18px' },
           }}
         >
-          APPLIED LABS
+          Vwin
         </Typography>
         <Box sx={{ display: { xs: 'none', md: 'flex' }, gap: 6, alignItems: 'center' }}>
-          <Typography sx={{ color: '#1f2937', cursor: 'pointer', fontSize: '15px', fontWeight: 400, '&:hover': { color: '#000000' }, transition: 'color 0.2s' }}>
-            Assurance
-          </Typography>
-          <Typography sx={{ color: '#1f2937', cursor: 'pointer', fontSize: '15px', fontWeight: 400, '&:hover': { color: '#000000' }, transition: 'color 0.2s' }}>
-            Blog
-          </Typography>
-          <Typography sx={{ color: '#1f2937', cursor: 'pointer', fontSize: '15px', fontWeight: 400, '&:hover': { color: '#000000' }, transition: 'color 0.2s' }}>
-            Company
-          </Typography>
+
           <Typography onClick={() => navigate('/login')} sx={{ color: '#1f2937', cursor: 'pointer', fontSize: '15px', fontWeight: 400, '&:hover': { color: '#000000' }, transition: 'color 0.2s' }}>
             Sign In
           </Typography>
@@ -98,7 +91,7 @@ const LandingPage = () => {
               },
             }}
           >
-            Get Demo
+            Start Free Trial
           </Button>
         </Box>
       </Box>
@@ -191,31 +184,14 @@ const LandingPage = () => {
               },
             }}
           >
-            Get Demo
+            Start Free Trial
           </Button>
         </Box>
         {/* 信任标语 */}
         <Chip icon={<StarIcon />} label="Trusted by thousands of customers" sx={{ mt: 6, bgcolor: '#f1f5f9', color: '#0f172a', fontWeight: 500 }} />
       </Container>
 
-      {/* 品牌与团队区块 */}
-      <Box sx={{ py: { xs: 10, md: 12 }, px: { xs: 3, md: 8 }, position: 'relative' }}>
-        <Container maxWidth="lg">
-          <Divider sx={{ mb: 6, opacity: 0.4 }} />
-          <Box display="flex" flexWrap="wrap" justifyContent="center" gap={4}>
-            {[1,2,3,4,5,6].map(n => (
-              <Box key={n} sx={{ flex: { xs: '1 1 calc(50% - 32px)', sm: '1 1 calc(33.33% - 32px)', md: '1 1 calc(16.66% - 32px)' }, minWidth: 140 }}>
-                <Paper elevation={0} sx={{ p: 2, textAlign: 'center', bgcolor: '#ffffff', border: '1px solid #e2e8f0', '&:hover': { boxShadow: '0 8px 24px -8px rgba(37,99,235,0.25)' } }}>
-                  <Typography variant="subtitle2" sx={{ fontWeight: 600, color: '#2563eb' }}>Brand {n}</Typography>
-                </Paper>
-              </Box>
-            ))}
-          </Box>
-          <Box mt={8} display="flex" justifyContent="center">
-            <Chip icon={<SchoolIcon />} label="Led by alumni of leading global technology and academic organizations" sx={{ maxWidth: 680, whiteSpace: 'normal', lineHeight: 1.4, bgcolor: '#f1f5f9', fontSize: { xs: 12, md: 13 } }} />
-          </Box>
-        </Container>
-      </Box>
+      <SunAnimation />
     </Box>
   );
 };

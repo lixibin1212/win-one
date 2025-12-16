@@ -15,7 +15,7 @@ from pydantic import BaseModel, EmailStr, validator
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 from sqlalchemy import create_engine, text
-from sqlalchemy.pool import NullPool
+from sqlalchemy.pool import QueuePool
 from datetime import datetime, timedelta
 import aiohttp
 import os
@@ -82,8 +82,12 @@ REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
 CORS_ORIGINS = os.getenv("CORS_ALLOW_ORIGINS", "http://localhost:3000,http://localhost:3002").split(",")
 
 # === Sora API Configuration ===
-SORA_API_KEY = "sk-a4f3a6be3c7a4c6d95633f4092586b59"
-SORA_BASE_URL = "https://api.grsai.com/v1"
+SORA_API_KEY = os.getenv("SORA_API_KEY", "sk-a4f3a6be3c7a4c6d95633f4092586b59")
+SORA_BASE_URL = os.getenv("SORA_BASE_URL", "https://api.grsai.com/v1")
+
+# Sora 文生视频（text-to-video）服务端 Key（后端代理使用，不在前端暴露）
+SORA_TEXT_API_KEY = os.getenv("SORA_TEXT_API_KEY", "sk-pKzjE8Mz3UNxSWBd39s8DvXVNCf1g6v4CNbmhzb0Vv0koFVl")
+SORA_TEXT_BASE_URL = os.getenv("SORA_TEXT_BASE_URL", "https://api.xgai.site/v2")
 
 # === Nano Banana API Configuration ===
 NANO_API_KEY = "sk-pKzjE8Mz3UNxSWBd39s8DvXVNCf1g6v4CNbmhzb0Vv0koFVl"
@@ -91,6 +95,15 @@ NANO_BASE_URL = "https://api.xgai.site/v1"
 
 # === 初始化 FastAPI ===
 app = FastAPI(title="安全认证系统", version="2.0.0")
+
+# === 简易内存缓存（终态与节流） ===
+# 终态缓存：任务一旦判定为 succeeded/failed，则在 TTL 时间内直接返回缓存，避免继续访问外部接口
+TERMINAL_CACHE_TTL_SECONDS = 120
+TERMINAL_TASKS: dict[str, dict] = {}
+
+# 节流：同一 task_id 的查询在 min 间隔内直接返回上次查询结果，减少瞬时并发请求
+THROTTLE_MIN_SECONDS = 3
+LAST_QUERY: dict[str, dict] = {}
 
 # === Redis 速率限制 ===
 if REDIS_AVAILABLE:
@@ -202,10 +215,13 @@ class NanoGenerateRequest(BaseModel):
 DATABASE_URL = "postgresql://postgres.vvrexwgovtnjdcdlwciw:6PeHd7pRt6zlbqXA@aws-1-ap-southeast-2.pooler.supabase.com:6543/postgres"
 engine = create_engine(
     DATABASE_URL,
-    poolclass=NullPool,
+    poolclass=QueuePool,
+    pool_size=5,
+    max_overflow=10,
+    pool_pre_ping=True,
     connect_args={
         "sslmode": "require",
-        "connect_timeout": 10
+        "connect_timeout": 30,
     }
 )
 
@@ -1204,6 +1220,202 @@ async def sora_result(task_id: str, user = Depends(get_current_user)):
                 
         except httpx.RequestError as e:
             raise HTTPException(status_code=500, detail="Sora Result API 请求异常")
+
+# === Sora 文生视频（Text-to-Video）代理接口（后端代理，记录任务） ===
+@app.post("/api/proxy/sora-text/generate")
+async def sora_text_generate(req: SoraGenerateRequest, user = Depends(get_current_user)):
+    """Sora2 文生视频生成代理：转发到 xgai 文生视频 API，并记录任务到 generations"""
+    if not SORA_TEXT_API_KEY:
+        raise HTTPException(status_code=400, detail="服务端未配置 SORA_TEXT_API_KEY")
+
+    url = f"{SORA_TEXT_BASE_URL}/videos/generations"
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {SORA_TEXT_API_KEY}"
+    }
+    payload = {
+        "prompt": req.prompt,
+        # SoraGenerateRequest 没有 model 字段，这里固定使用 sora-2
+        "model": "sora-2",
+        "aspect_ratio": req.aspectRatio,
+        "duration": str(req.duration)
+    }
+
+    async with httpx.AsyncClient() as client:
+        try:
+            resp = await client.post(url, json=payload, headers=headers, timeout=30.0)
+            if resp.status_code != 200:
+                logger.error(f"Sora Text API Error: {resp.text}")
+                raise HTTPException(status_code=resp.status_code, detail="Sora 文生视频调用失败")
+
+            data = resp.json()
+            task_id = data.get("task_id") or data.get("data", {}).get("id")
+            if not task_id:
+                raise HTTPException(status_code=500, detail="Sora 文生视频未返回任务ID")
+
+            try:
+                with engine.connect() as conn:
+                    conn.execute(
+                        text(
+                            """
+                            INSERT INTO generations (task_id, model, prompt, images, aspect_ratio, status, created_at)
+                            VALUES (:task_id, :model, :prompt, :images, :aspect_ratio, :status, NOW())
+                            """
+                        ),
+                        {
+                            "task_id": task_id,
+                            "model": "sora2-text",
+                            "prompt": req.prompt,
+                            "images": [],
+                            "aspect_ratio": req.aspectRatio,
+                            "status": "pending",
+                        },
+                    )
+                    conn.commit()
+            except Exception as e:
+                logger.warning(f"Insert generations (sora-text) failed: {e}")
+
+            return {"task_id": task_id}
+        except httpx.RequestError as e:
+            logger.error(f"Sora Text Request Error: {e}")
+            raise HTTPException(status_code=500, detail="Sora 文生视频请求异常")
+
+@app.get("/api/proxy/sora-text/result/{task_id}")
+async def sora_text_result(task_id: str, user = Depends(get_current_user)):
+    """Sora2 文生视频结果查询代理：调用 xgai 查询接口，统一返回并更新 generations"""
+    if not SORA_TEXT_API_KEY:
+        raise HTTPException(status_code=400, detail="服务端未配置 SORA_TEXT_API_KEY")
+
+    # 1) 若终态已缓存，直接返回，避免继续访问外部接口
+    try:
+        cached = TERMINAL_TASKS.get(task_id)
+        if cached:
+            ts = cached.get("ts")
+            if ts and (datetime.utcnow() - ts).total_seconds() < TERMINAL_CACHE_TTL_SECONDS:
+                return {"status": cached.get("status"), "video_url": cached.get("video_url"), "error": cached.get("error"), "cached": True}
+            else:
+                # 过期，移除缓存
+                TERMINAL_TASKS.pop(task_id, None)
+    except Exception:
+        pass
+
+    # 2) 节流：若在短间隔内查询过，直接返回上次响应，减少瞬时并发
+    try:
+        last = LAST_QUERY.get(task_id)
+        if last:
+            last_ts = last.get("ts")
+            if last_ts and (datetime.utcnow() - last_ts).total_seconds() < THROTTLE_MIN_SECONDS:
+                return last.get("resp")
+    except Exception:
+        pass
+
+    url = f"{SORA_TEXT_BASE_URL}/videos/generations/{task_id}"
+    headers = {
+        "Authorization": f"Bearer {SORA_TEXT_API_KEY}"
+    }
+
+    async with httpx.AsyncClient() as client:
+        try:
+            resp = await client.get(url, headers=headers, timeout=30.0)
+            if resp.status_code != 200:
+                raise HTTPException(status_code=resp.status_code, detail="Sora 文生视频结果查询失败")
+
+            data = resp.json()
+            # xgai 响应示例中的 status: SUCCESS/FAILED/PROCESSING
+            status_raw = (data.get("status") or "").lower()
+            if status_raw in ("success", "succeeded", "successed"):
+                status = "succeeded"
+            elif status_raw in ("failed", "failure", "error"):
+                status = "failed"
+            else:
+                status = "processing"
+
+            video_url = None
+            # xgai 示例：data: { output: "<mp4 url>" }
+            inner_data = data.get("data") or {}
+            if isinstance(inner_data, dict):
+                video_url = inner_data.get("output")
+
+            # 更新 generations 表
+            try:
+                with engine.connect() as conn:
+                    if status == "succeeded":
+                        conn.execute(
+                            text(
+                                """
+                                UPDATE generations
+                                SET status = 'succeeded', video_url = :video_url, completed_at = NOW()
+                                WHERE task_id = :task_id
+                                """
+                            ),
+                            {"video_url": video_url, "task_id": task_id},
+                        )
+                    elif status == "failed":
+                        conn.execute(
+                            text(
+                                """
+                                UPDATE generations
+                                SET status = 'failed', completed_at = NOW()
+                                WHERE task_id = :task_id
+                                """
+                            ),
+                            {"task_id": task_id},
+                        )
+                    else:
+                        # 处理中不更新 completed_at
+                        conn.execute(
+                            text(
+                                """
+                                UPDATE generations
+                                SET status = 'processing'
+                                WHERE task_id = :task_id AND status != 'succeeded' AND status != 'failed'
+                                """
+                            ),
+                            {"task_id": task_id},
+                        )
+                    conn.commit()
+            except Exception as e:
+                logger.warning(f"Update generations (sora-text {status}) failed: {e}")
+
+            # 失败原因（若有）
+            error_msg = None
+            # xgai 示例：fail_reason 是字符串，或包含 JSON 字符串
+            fail_reason = data.get("fail_reason")
+            if isinstance(fail_reason, str) and fail_reason:
+                # 尝试解析成 JSON，提取 message
+                try:
+                    import json
+                    fr = json.loads(fail_reason)
+                    error_msg = fr.get("message") or fail_reason
+                except Exception:
+                    error_msg = fail_reason
+            elif isinstance(fail_reason, dict):
+                error_msg = fail_reason.get("message")
+
+            result = {"status": status, "video_url": video_url, "raw": data}
+            if status == "failed" and error_msg:
+                result["error"] = error_msg
+            # 3) 终态写入缓存；处理中不缓存终态
+            try:
+                if status in ("succeeded", "failed"):
+                    TERMINAL_TASKS[task_id] = {
+                        "status": status,
+                        "video_url": video_url,
+                        "error": error_msg,
+                        "ts": datetime.utcnow(),
+                    }
+            except Exception:
+                pass
+
+            # 4) 记录本次响应用于节流
+            try:
+                LAST_QUERY[task_id] = {"ts": datetime.utcnow(), "resp": result}
+            except Exception:
+                pass
+
+            return result
+        except httpx.RequestError:
+            raise HTTPException(status_code=500, detail="Sora 文生视频结果查询异常")
 
 # === Nano Banana Proxy APIs ===
 

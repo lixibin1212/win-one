@@ -41,6 +41,7 @@ import AddPhotoAlternateIcon from '@mui/icons-material/AddPhotoAlternate';
 import CloseIcon from '@mui/icons-material/Close';
 import { createClient } from '@supabase/supabase-js';
 import ThreeDCarousel from './ThreeDCarousel';
+import { useAuth } from './AuthContext';
 
 // 带加载占位的轻量视频组件
 const VideoWithLoader: React.FC<{
@@ -159,7 +160,12 @@ const shine = keyframes`
   100% { left: 200%; }
 `;
 
-// 已移除彩虹流光边框动画（用户不需要）
+// 边框流光动画
+const borderMove = keyframes`
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+`;
 
 // 运行态：闪烁文字
 const blink = keyframes`
@@ -181,7 +187,7 @@ const cardBase = {
   '&:hover': {
     // 悬浮时阴影加深并扩散
     boxShadow: '0 30px 60px -8px rgba(37, 99, 235, 0.15), 0 12px 24px -6px rgba(0, 0, 0, 0.08)',
-    transform: 'translateY(-4px)',
+    // transform: 'translateY(-4px)', // 移除上浮效果
     borderColor: 'rgba(255, 255, 255, 0.9)'
   }
 };
@@ -197,12 +203,10 @@ const SUPABASE_BUCKET = 'Vwin';
 
 const HomePage = () => {
   const navigate = useNavigate();
-  const [user, setUser] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
 
   // 标签页状态
-  const [activeTab, setActiveTab] = useState<'veo2' | 'veo3' | 'veo3+' | 'sora2'>('veo2');
+  const [activeTab, setActiveTab] = useState<'veo2' | 'veo3' | 'veo3+' | 'sora2' | 'sora2-text'>('veo2');
   // 模块选择状态
   const [currentModule, setCurrentModule] = useState<'veo' | 'sora' | 'nano'>('veo');
 
@@ -228,12 +232,15 @@ const HomePage = () => {
   const [uploadingNano, setUploadingNano] = useState(false);
   const [uploadingSora, setUploadingSora] = useState(false);
   const [soraUrl, setSoraUrl] = useState(''); // Sora 专用 URL
+  // Sora2 文生视频表单状态（精简：仅保留必要字段）
+  const [soraTextModel, setSoraTextModel] = useState<'sora-2'>('sora-2');
   const [isGenerating, setIsGenerating] = useState(false);
   const [taskId, setTaskId] = useState<string | null>(null);
   const [generationResult, setGenerationResult] = useState<any>(null);
   const [snackbarOpen, setSnackbarOpen] = useState(false);
   const [snackbarMsg, setSnackbarMsg] = useState('');
   const pollTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const pollingActiveRef = useRef<boolean>(false);
   const generatingModelRef = useRef<string>(''); // 用于记录当前正在生成的模型名称，以便在结果中展示
   // 防重复提交：最近一次请求的幂等键与时间戳
   const lastReqKeyRef = useRef<string>('');
@@ -432,29 +439,15 @@ const HomePage = () => {
     submitNext();
   }, [jobs, currentModule]);
 
+  const { user, loading, logout } = useAuth();
   useEffect(() => {
     const token = localStorage.getItem('access_token');
+    // 仅当没有 token 时跳转登录；有 token 即使暂时拉不到用户，也允许进入页面
     if (!token) {
       navigate('/login');
       return;
     }
-
-    // 获取用户信息
-    fetch(`${API_BASE}/me`, {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-      .then(res => {
-        if (!res.ok) throw new Error('Unauthorized');
-        return res.json();
-      })
-      .then(data => {
-        setUser(data);
-        setLoading(false);
-      })
-      .catch(() => {
-        localStorage.removeItem('access_token');
-        navigate('/login');
-      });
+    // 保留页面，等待 AuthProvider 完成鉴权；不要因 user 为空而重定向
   }, [navigate]);
 
   // 轮询任务状态
@@ -466,7 +459,9 @@ const HomePage = () => {
           // 根据当前模块选择不同的查询接口
           // Nano 模块不需要轮询，直接返回结果，所以这里不需要处理 nano
           const statusUrl = currentModule === 'sora'
-            ? `${API_BASE}/api/proxy/sora/result/${taskId}`
+            ? (activeTab === 'sora2-text'
+                ? `${API_BASE}/api/proxy/sora-text/result/${taskId}`
+                : `${API_BASE}/api/proxy/sora/result/${taskId}`)
             : `${API_BASE}/api/tasks/${taskId}`;
 
           const res = await fetch(statusUrl, {
@@ -477,6 +472,12 @@ const HomePage = () => {
             // 统一归一化状态大小写
             const statusRaw = (data.status || data.data?.status || '').toString().toLowerCase();
             if (['succeeded', 'success', 'completed'].includes(statusRaw)) {
+              // 立即停止当前轮询，避免在依赖变化清理前继续触发一次
+              if (pollTimerRef.current) {
+                clearInterval(pollTimerRef.current);
+                pollTimerRef.current = null;
+              }
+              pollingActiveRef.current = false;
               // 注入模型名称
               const resultWithModel = { ...data, _model: generatingModelRef.current };
               setGenerationResult(resultWithModel);
@@ -484,10 +485,28 @@ const HomePage = () => {
               setTaskId(null);
               setSnackbarMsg('视频生成成功！');
               setSnackbarOpen(true);
-            } else if (['failed', 'error'].includes(statusRaw) || data.error) {
+            } else if (['failed', 'failure', 'error'].includes(statusRaw) || data.error || data.fail_reason) {
+              // 立即停止当前轮询
+              if (pollTimerRef.current) {
+                clearInterval(pollTimerRef.current);
+                pollTimerRef.current = null;
+              }
+              pollingActiveRef.current = false;
               setIsGenerating(false);
               setTaskId(null);
-              setSnackbarMsg('视频生成失败: ' + (data.error?.message || data.error || '未知错误'));
+              const failMsg = (() => {
+                if (typeof data.error === 'string') return data.error;
+                if (data.error?.message) return data.error.message;
+                if (typeof data.fail_reason === 'string' && data.fail_reason) {
+                  try {
+                    const fr = JSON.parse(data.fail_reason);
+                    if (fr?.message) return fr.message;
+                  } catch {}
+                  return data.fail_reason;
+                }
+                return '未知错误';
+              })();
+              setSnackbarMsg('视频生成失败: ' + failMsg);
               setSnackbarOpen(true);
             }
             // 如果是 processing 或 pending，继续轮询
@@ -497,11 +516,20 @@ const HomePage = () => {
         }
       };
 
-      pollTimerRef.current = setInterval(checkStatus, 3000); // 每3秒轮询一次
+      // 启动新轮询前，确保旧的已清理；避免重复定时器
+      if (pollTimerRef.current) {
+        clearInterval(pollTimerRef.current);
+        pollTimerRef.current = null;
+      }
+      if (!pollingActiveRef.current) {
+        pollTimerRef.current = setInterval(checkStatus, 3000); // 每3秒轮询一次
+        pollingActiveRef.current = true;
+      }
     }
 
     return () => {
       if (pollTimerRef.current) clearInterval(pollTimerRef.current);
+      pollingActiveRef.current = false;
     };
   }, [taskId, currentModule]);
 
@@ -529,7 +557,7 @@ const HomePage = () => {
 
   const handleLogout = () => {
     localStorage.removeItem('access_token');
-    setUser(null);
+    logout();
     navigate('/');
   };
 
@@ -609,11 +637,13 @@ const HomePage = () => {
     let payload: any = {};
 
     // 记录当前模型名称
-    const currentModelName = currentModule === 'sora' ? 'Sora' : (currentModule === 'nano' ? nanoModel : selectedModel);
+    const currentModelName = currentModule === 'sora'
+      ? (activeTab === 'sora2' ? 'sora图' : 'sora2文')
+      : (currentModule === 'nano' ? nanoModel : selectedModel);
     generatingModelRef.current = currentModelName;
 
-    if (currentModule === 'sora') {
-      // 走异步队列：Sora2 无水印
+    if (currentModule === 'sora' && activeTab === 'sora2') {
+      // 走异步队列：Sora2 无水印（参考图）
       const id = Math.random().toString(36).slice(2);
       const reqKey = mkKey({ module: 'sora', model: 'sora2', prompt, aspectRatio, duration, size, url: soraUrl });
       const now = Date.now();
@@ -640,6 +670,17 @@ const HomePage = () => {
       setSnackbarMsg('任务已加入队列');
       setSnackbarOpen(true);
       return;
+    } else if (currentModule === 'sora' && activeTab === 'sora2-text') {
+      // 改为走后端代理，避免在前端暴露外部 Key
+      endpoint = '/api/proxy/sora-text/generate';
+      payload = {
+        prompt,
+        model: soraTextModel,
+        aspectRatio: aspectRatio,
+        duration: duration,
+        size: size
+      } as any;
+      // 后续统一走下方的通用提交逻辑
     } else if (currentModule === 'nano') {
       endpoint = '/api/proxy/nano/generate';
       payload = {
@@ -845,6 +886,24 @@ const HomePage = () => {
             </Typography>
 
             <Box display="flex" alignItems="center" gap={2}>
+              <Button 
+                onClick={() => navigate('/pricing')}
+                sx={{ 
+                  color: '#ffffff', 
+                  fontWeight: 600,
+                  mr: 2,
+                  textShadow: '1px 1px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000',
+                  transition: 'all 0.3s',
+                  '&:hover': { 
+                    bgcolor: 'transparent',
+                    transform: 'scale(1.2)',
+                    textShadow: '1px 1px 0 #000, 3px 3px 0px rgba(0,0,0,0.5)',
+                  }
+                }}
+              >
+                会员套餐
+              </Button>
+
               <Box display="flex" alignItems="center" gap={1}>
                 <Typography variant="subtitle2" sx={{ color: '#1e293b', display: { xs: 'none', sm: 'block' } }}>
                   {user?.username}
@@ -904,7 +963,10 @@ const HomePage = () => {
                       mb: 1, mx: 1, borderRadius: 1,
                       bgcolor: currentModule === 'veo' ? 'rgba(37, 99, 235, 0.08)' : 'transparent',
                       color: currentModule === 'veo' ? 'primary.main' : 'inherit',
-                      '&.Mui-selected': { bgcolor: 'rgba(37, 99, 235, 0.12)' }
+                      '&.Mui-selected': { 
+                        bgcolor: 'rgba(37, 99, 235, 0.12)',
+                        '&:hover': { bgcolor: 'rgba(37, 99, 235, 0.12)' }
+                      }
                     }}
                   >
                     <ListItemIcon sx={{ color: currentModule === 'veo' ? 'primary.main' : 'inherit' }}>
@@ -923,7 +985,10 @@ const HomePage = () => {
                       mb: 1, mx: 1, borderRadius: 1,
                       bgcolor: currentModule === 'sora' ? 'rgba(16, 185, 129, 0.08)' : 'transparent',
                       color: currentModule === 'sora' ? 'secondary.main' : 'inherit',
-                      '&.Mui-selected': { bgcolor: 'rgba(16, 185, 129, 0.12)' }
+                      '&.Mui-selected': { 
+                        bgcolor: 'rgba(16, 185, 129, 0.12)',
+                        '&:hover': { bgcolor: 'rgba(16, 185, 129, 0.12)' }
+                      }
                     }}
                   >
                     <ListItemIcon sx={{ color: currentModule === 'sora' ? 'secondary.main' : 'inherit' }}>
@@ -939,7 +1004,10 @@ const HomePage = () => {
                       mb: 1, mx: 1, borderRadius: 1,
                       bgcolor: currentModule === 'nano' ? 'rgba(245, 158, 11, 0.08)' : 'transparent',
                       color: currentModule === 'nano' ? '#f59e0b' : 'inherit',
-                      '&.Mui-selected': { bgcolor: 'rgba(245, 158, 11, 0.12)' }
+                      '&.Mui-selected': { 
+                        bgcolor: 'rgba(245, 158, 11, 0.12)',
+                        '&:hover': { bgcolor: 'rgba(245, 158, 11, 0.12)' }
+                      }
                     }}
                   >
                     <ListItemIcon sx={{ color: currentModule === 'nano' ? '#f59e0b' : 'inherit' }}>
@@ -1059,59 +1127,92 @@ const HomePage = () => {
                     </Box>
                   </>
                 ) : currentModule === 'sora' ? (
-                  /* Sora Tab */
-                  <Box
-                    onClick={() => setActiveTab('sora2')}
-                    sx={{
-                      position: 'relative',
-                      bgcolor: '#10b981',
-                      color: 'white',
-                      pl: 3,
-                      pr: 6,
-                      py: 0.75,
-                      width: 'fit-content',
-                      cursor: 'pointer',
-                      clipPath: 'polygon(0% 0%, calc(100% - 12px) 0%, 100% 50%, calc(100% - 12px) 100%, 0% 100%, 12px 50%)',
-                      display: 'flex',
-                      alignItems: 'center',
-                      overflow: 'hidden',
-                      transition: 'all 0.3s',
-                      '&::after': {
-                        content: '""',
-                        position: 'absolute',
-                        top: 0,
-                        bottom: 0,
-                        width: '6px',
-                        bgcolor: 'rgba(255, 255, 255, 0.4)',
-                        transform: 'skewX(-20deg)',
-                        animation: `${shine} 1.5s infinite linear`
-                      }
-                    }}
-                  >
-                    <Box sx={{ position: 'relative' }}>
-                      <Typography variant="subtitle1" fontWeight={700}>
-                        Sora2
-                      </Typography>
-                      <Box
-                        sx={{
+                  /* Sora Tabs */
+                  <>
+                    <Box
+                      onClick={() => setActiveTab('sora2')}
+                      sx={{
+                        position: 'relative',
+                        bgcolor: activeTab === 'sora2' ? '#10b981' : '#e2e8f0',
+                        color: activeTab === 'sora2' ? 'white' : '#64748b',
+                        pl: 3,
+                        pr: 6,
+                        py: 0.75,
+                        width: 'fit-content',
+                        cursor: 'pointer',
+                        clipPath: 'polygon(0% 0%, calc(100% - 12px) 0%, 100% 50%, calc(100% - 12px) 100%, 0% 100%, 12px 50%)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        overflow: 'hidden',
+                        transition: 'all 0.3s',
+                        '&::after': activeTab === 'sora2' ? {
+                          content: '""',
                           position: 'absolute',
-                          top: -4,
-                          left: '100%',
-                          ml: -0.5,
-                          fontSize: '10px',
-                          border: '1px solid white',
-                          borderRadius: '10px',
-                          px: 0.5,
-                          whiteSpace: 'nowrap',
-                          lineHeight: 1.2,
-                          transform: 'scale(0.9)',
-                          transformOrigin: 'left center'
-                        }}
-                      >
-                        无水印
+                          top: 0,
+                          bottom: 0,
+                          width: '6px',
+                          bgcolor: 'rgba(255, 255, 255, 0.4)',
+                          transform: 'skewX(-20deg)',
+                          animation: `${shine} 1.5s infinite linear`
+                        } : {}
+                      }}
+                    >
+                      <Box sx={{ position: 'relative' }}>
+                        <Typography variant="subtitle1" fontWeight={700}>
+                          Sora2
+                        </Typography>
+                        <Box
+                          sx={{
+                            position: 'absolute',
+                            top: -4,
+                            left: '100%',
+                            ml: -0.5,
+                            fontSize: '10px',
+                            border: '1px solid white',
+                            borderRadius: '10px',
+                            px: 0.5,
+                            whiteSpace: 'nowrap',
+                            lineHeight: 1.2,
+                            transform: 'scale(0.9)',
+                            transformOrigin: 'left center'
+                          }}
+                        >
+                          无水印
+                        </Box>
                       </Box>
                     </Box>
-                  </Box>
+
+                    <Box
+                      onClick={() => setActiveTab('sora2-text')}
+                      sx={{
+                        position: 'relative',
+                        bgcolor: activeTab === 'sora2-text' ? '#8b5cf6' : '#e2e8f0',
+                        color: activeTab === 'sora2-text' ? 'white' : '#64748b',
+                        pl: 3,
+                        pr: 3,
+                        py: 0.75,
+                        width: 'fit-content',
+                        cursor: 'pointer',
+                        clipPath: 'polygon(0% 0%, calc(100% - 12px) 0%, 100% 50%, calc(100% - 12px) 100%, 0% 100%, 12px 50%)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        overflow: 'hidden',
+                        transition: 'all 0.3s',
+                        '&::after': activeTab === 'sora2-text' ? {
+                          content: '""',
+                          position: 'absolute',
+                          top: 0,
+                          bottom: 0,
+                          width: '6px',
+                          bgcolor: 'rgba(255, 255, 255, 0.4)',
+                          transform: 'skewX(-20deg)',
+                          animation: `${shine} 1.5s infinite linear`
+                        } : {}
+                      }}
+                    >
+                      <Typography variant="subtitle1" fontWeight={700}>sora2文生视频</Typography>
+                    </Box>
+                  </>
                 ) : (
                   /* Nano Tab */
                   <Box
@@ -1419,6 +1520,61 @@ const HomePage = () => {
                     ) : currentModule === 'sora' ? (
                       /* Sora 表单字段 */
                       <>
+                        {activeTab === 'sora2-text' ? (
+                          // 文生视频字段
+                          <>
+                            <FormControl fullWidth size="small">
+                              <InputLabel>Model</InputLabel>
+                              <Select
+                                value={soraTextModel}
+                                label="Model"
+                                onChange={(e) => setSoraTextModel(e.target.value as any)}
+                              >
+                                <MenuItem value="sora-2">sora-2</MenuItem>
+                              </Select>
+                            </FormControl>
+
+                            <Grid container spacing={2}>
+                              <Grid size={6}>
+                                <FormControl fullWidth size="small">
+                                  <InputLabel>Aspect Ratio</InputLabel>
+                                  <Select
+                                    value={aspectRatio}
+                                    label="Aspect Ratio"
+                                    onChange={(e) => setAspectRatio(e.target.value)}
+                                  >
+                                    <MenuItem value="16:9">16:9 横屏</MenuItem>
+                                    <MenuItem value="9:16">9:16 竖屏</MenuItem>
+                                  </Select>
+                                </FormControl>
+                              </Grid>
+                              <Grid size={6}>
+                                <FormControl fullWidth size="small">
+                                  <InputLabel>Duration</InputLabel>
+                                  <Select
+                                    value={duration}
+                                    label="Duration"
+                                    onChange={(e) => setDuration(Number(e.target.value))}
+                                  >
+                                    <MenuItem value={10}>10s</MenuItem>
+                                    <MenuItem value={15}>15s</MenuItem>
+                                  </Select>
+                                </FormControl>
+                              </Grid>
+                            </Grid>
+
+                            <Box sx={{ mt: 1 }}>
+                              <Typography variant="caption" color="text.secondary">
+                                审查说明：
+                                1）图片或生成结果中涉及真人/像真人的不允许；
+                                2）提示词不得含暴力、色情、版权、活着的名人；
+                                3）生成结果将进行多阶段审查（可能在 90% 后失败）。
+                              </Typography>
+                            </Box>
+                          </>
+                        ) : (
+                          // Sora2 无水印 - 参考图必填
+                          <>
                         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
                           <Typography variant="caption" color="text.secondary">Reference Image (参考图片 - 必填)</Typography>
                           <Box sx={{ width: 110, position: 'relative' }}>
@@ -1544,6 +1700,8 @@ const HomePage = () => {
                             <MenuItem value="large">Large (HD)</MenuItem>
                           </Select>
                         </FormControl>
+                          </>
+                        )}
                       </>
                     ) : (
                       /* Nano Banana 表单字段 */
@@ -1731,13 +1889,81 @@ const HomePage = () => {
                   mr: { xs: 0, lg: 3 },
                   height: 'calc(100vh - 200px)',
                   minHeight: 600,
-                  bgcolor: '#0f172a',
-                  color: 'white',
-                  borderRadius: 1,
-                  p: 2,
-                  overflowY: 'auto', // 整个区域可滚动
-                  position: 'relative'
+                  position: 'relative',
+                  // 悬浮时触发子元素动画
+                  '&:hover .border-anim': {
+                    // Red: 100% 0% (BL) -> 100% 100% (TL)
+                    // Blue: 0% 100% (TR) -> 0% 0% (BR)
+                    backgroundPosition: '100% 100%, 0% 0%',
+                  }
                 }}>
+                  {/* 1. 独立边框层：仅显示边框线条，中间镂空，避免影响内部半透明背景 */}
+                  <Box className="border-anim" sx={{
+                    position: 'absolute',
+                    inset: 0,
+                    borderRadius: '24px',
+                    padding: '2px', // 边框宽度
+                    
+                    // 使用两个径向渐变模拟移动的光斑
+                    // 1. 红色光斑 (Red Spot)
+                    // 2. 蓝色光斑 (Blue Spot)
+                    backgroundImage: `
+                      radial-gradient(circle at center, #ef4444 0%, transparent 50%),
+                      radial-gradient(circle at center, #3b82f6 0%, transparent 50%)
+                    `,
+                    backgroundSize: '200% 200%, 200% 200%', // 2倍大小，便于计算位置
+                    backgroundRepeat: 'no-repeat, no-repeat',
+                    
+                    // 初始位置 (基于 200% 大小的计算)：
+                    // Red (Bottom Left): 100% 0%
+                    // Blue (Top Right): 0% 100%
+                    backgroundPosition: '100% 0%, 0% 100%',
+                    
+                    transition: 'background-position 1.5s ease', // 平滑移动动画
+                    
+                    // 核心：使用 mask 镂空中间区域，只保留 2px 边框
+                    mask: 'linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0)',
+                    maskComposite: 'exclude',
+                    WebkitMask: 'linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0)',
+                    WebkitMaskComposite: 'xor',
+                    
+                    pointerEvents: 'none',
+                    zIndex: 1,
+                  }} />
+
+                  {/* 2. 内容层：负责背景、滚动和内容展示 */}
+                  <Box sx={{
+                    flex: 1,
+                    background: 'rgba(170, 210, 255, 0.35)', // 纯净的冰雪背景
+                    backdropFilter: 'blur(12px) saturate(110%)',
+                    borderRadius: '24px', // 与边框一致
+                    overflow: 'hidden', // 裁剪内部滚动条圆角
+                    display: 'flex',
+                    flexDirection: 'column',
+                    position: 'relative',
+                    zIndex: 0,
+                    boxShadow: 'none',
+                  }}>
+                    <Box sx={{
+                      flex: 1,
+                      overflowY: 'auto',
+                      p: 3,
+                      color: 'white',
+                      textShadow: '0 2px 4px rgba(0,0,0,0.1)',
+                      
+                      // 顶部高光装饰
+                      '&::before': {
+                        content: '""',
+                        position: 'absolute',
+                        top: 0,
+                        left: 0,
+                        right: 0,
+                        height: '1px',
+                        background: 'linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.8) 50%, transparent 100%)',
+                        opacity: 0.7,
+                        pointerEvents: 'none'
+                      }
+                    }}>
 
                   {/* 统一结果展示区域：Grid 布局 */}
                   <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr', lg: '1fr 1fr 1fr' }, gap: 2 }}>
@@ -1946,7 +2172,7 @@ const HomePage = () => {
                           {/* 模型标签 */}
                           <Chip
                             className="model-tag"
-                            label={job.module === 'sora' ? 'Sora2' : job.model}
+                            label={job.module === 'sora' ? (job.sora_url ? 'sora图' : 'sora2文') : job.model}
                             size="small"
                             sx={{
                               position: 'absolute',
@@ -2012,12 +2238,22 @@ const HomePage = () => {
 
                   {/* 3. Empty State (既没生成，也没历史) */}
                   {!isGenerating && !generationResult && (!jobs || jobs.length === 0) && (
-                    <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', opacity: 0.5, minHeight: 400 }}>
-                      <MovieCreationIcon sx={{ fontSize: 64, mb: 1 }} />
-                      <Typography variant="subtitle1" fontWeight={700} letterSpacing={1}>RESULT</Typography>
-                      <Typography variant="caption">Your result will appear here</Typography>
+                    <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', opacity: 0.8, minHeight: 400 }}>
+                      <Typography variant="h5" fontWeight={900} letterSpacing={2} sx={{ 
+                        color: 'white',
+                        WebkitTextStroke: '1px black',
+                        textShadow: '0 2px 4px rgba(0,0,0,0.2)'
+                      }}>RESULT</Typography>
+                      <Typography variant="body1" sx={{ 
+                        mt: 1,
+                        color: 'white',
+                        WebkitTextStroke: '0.5px black',
+                        fontWeight: 500
+                      }}>Your result will appear here</Typography>
                     </Box>
                   )}
+                    </Box>
+                  </Box>
                 </Box>
               </Box>
             </Paper>

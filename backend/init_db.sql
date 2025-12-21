@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS users (
     
     -- 用户信息
     role VARCHAR(20) DEFAULT 'user',
+    identity VARCHAR(20) DEFAULT 'free',
     points INTEGER DEFAULT 0,
     avatar_url TEXT,
     

@@ -49,7 +49,7 @@ const VideoWithLoader: React.FC<{
   autoPlay?: boolean;
   loop?: boolean;
   style?: React.CSSProperties;
-}> = ({ src, autoPlay = true, loop = true, style }) => {
+}> = ({ src, autoPlay = false, loop = true, style }) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -82,7 +82,7 @@ const VideoWithLoader: React.FC<{
               zIndex: 1,
               color: 'rgba(255,255,255,0.85)',
               letterSpacing: 1,
-              animation: `${blink} 1.2s ease-in-out infinite`,
+              animation: `${blink} 2.4s ease-in-out infinite`,
             }}
           >
             加载中...
@@ -98,12 +98,12 @@ const VideoWithLoader: React.FC<{
       )}
 
       <video
-        onMouseEnter={(e) => (e.currentTarget.controls = true)}
-        onMouseLeave={(e) => (e.currentTarget.controls = false)}
+        controls
         autoPlay={autoPlay}
         loop={loop}
         style={style}
         src={src}
+        playsInline
         onLoadedData={() => setLoading(false)}
         onCanPlay={() => setLoading(false)}
         onError={() => setError('failed')}
@@ -274,12 +274,12 @@ const HomePage = () => {
     }
   }, [generationResult]);
 
-  // 并行异步队列（仅用于 Veo2 / Veo2 Fast Frames）
+  // 并行异步队列（用于 Veo / Sora；同时也承载 Nano 的历史与运行中占位）
   type Job = {
     id: string; // 本地队列ID
     taskId?: string; // 远端任务ID
-    model: 'veo2' | 'veo2-fast-frames' | 'veo3' | 'veo3-fast' | 'veo3-frames' | 'veo3-pro' | 'veo3-pro-frames' | 'veo3.1-components' | 'veo3.1' | 'veo3.1-pro';
-    module?: 'veo' | 'sora'; // 所属模块
+    model: 'veo2' | 'veo2-fast-frames' | 'veo3' | 'veo3-fast' | 'veo3-frames' | 'veo3-pro' | 'veo3-pro-frames' | 'veo3.1-components' | 'veo3.1' | 'veo3.1-pro' | 'sora2' | 'sora2-text' | 'nano-banana' | 'nano-banana-2';
+    module?: 'veo' | 'sora' | 'nano'; // 所属模块
     prompt: string;
     aspect_ratio: string;
     images?: string[];
@@ -297,6 +297,9 @@ const HomePage = () => {
   const MAX_PARALLEL = 3;
   // 后端已提供统一接口：生成 /api/generate/video，查询 /api/tasks/{task_id}
   // 服务端会根据 model 自动路由（veo2/veo3），前端无需区分
+
+  // 仅在“正在发起请求”阶段锁定按钮；拿到 taskId 或加入队列后即解锁
+  const isSubmitting = isGenerating && !taskId;
 
   // 当队列变化时，写入本地缓存
   useEffect(() => {
@@ -320,10 +323,11 @@ const HomePage = () => {
         try {
           let res: Response;
           if (job.module === 'sora') {
-            // Sora 查询接口
-            res = await fetch(`${API_BASE}/api/proxy/sora/result/${job.taskId}`, {
-              headers: { Authorization: `Bearer ${token}` }
-            });
+            // Sora 查询接口：区分图（sora2）与文生视频（sora2-text）
+            const url = (job.model === 'sora2-text')
+              ? `${API_BASE}/api/proxy/sora-text/result/${job.taskId}`
+              : `${API_BASE}/api/proxy/sora/result/${job.taskId}`;
+            res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
           } else {
             // Veo 查询接口
             res = await fetch(`${API_BASE}/api/tasks/${job.taskId}`, {
@@ -359,14 +363,22 @@ const HomePage = () => {
               console.warn('Supabase insert failed', e);
             }
           } else if (['failed', 'error'].includes(statusRaw) || data.error) {
-            updates[job.id] = { status: 'failed', error: data.error?.message || data.error || '未知错误' };
+            const failText = data.error?.message || data.error || '未知错误';
+            updates[job.id] = { status: 'failed', error: failText };
+            // 弹出错误提醒
+            setSnackbarMsg('生成失败: ' + failText);
+            setSnackbarOpen(true);
           }
         } catch (e: any) {
           console.error('poll error', e);
         }
       }
       if (Object.keys(updates).length) {
-        setJobs(prev => prev.map(j => updates[j.id] ? { ...j, ...updates[j.id] } : j));
+        setJobs(prev => {
+          const merged = prev.map(j => updates[j.id] ? { ...j, ...updates[j.id] } : j);
+          // 对 Sora2（无水印）失败的任务，直接取消 UI（不在列表展示）
+          return merged.filter(j => !(j.module === 'sora' && j.status === 'failed'));
+        });
       }
     }, 3000);
     return () => clearInterval(interval);
@@ -389,14 +401,27 @@ const HomePage = () => {
         try {
           let res: Response;
           if (job.module === 'sora') {
-            const endpoint = '/api/proxy/sora/generate';
-            const payload: any = {
-              prompt: job.prompt,
-              aspectRatio: job.aspect_ratio,
-              duration: job.duration || 10,
-              size: job.size || 'small',
-              url: job.sora_url || undefined
-            };
+            // Sora 提交：区分图（sora2）与文生视频（sora2-text）
+            let endpoint = '';
+            let payload: any = {};
+            if (job.model === 'sora2-text') {
+              endpoint = '/api/proxy/sora-text/generate';
+              payload = {
+                prompt: job.prompt,
+                aspectRatio: job.aspect_ratio,
+                duration: job.duration || 10,
+                size: job.size || 'small'
+              };
+            } else {
+              endpoint = '/api/proxy/sora/generate';
+              payload = {
+                prompt: job.prompt,
+                aspectRatio: job.aspect_ratio,
+                duration: job.duration || 10,
+                size: job.size || 'small',
+                url: job.sora_url || undefined
+              };
+            }
             res = await fetch(`${API_BASE}${endpoint}`, {
               method: 'POST',
               headers: {
@@ -440,6 +465,18 @@ const HomePage = () => {
   }, [jobs, currentModule]);
 
   const { user, loading, logout } = useAuth();
+  
+  // 调试：打印用户信息
+  useEffect(() => {
+    console.log('=== 用户信息调试 ===');
+    console.log('Loading 状态:', loading);
+    console.log('User object:', user);
+    console.log('Username:', user?.username);
+    console.log('Email:', user?.email);
+    console.log('Token:', localStorage.getItem('access_token') ? '存在' : '不存在');
+    console.log('==================');
+  }, [user, loading]);
+  
   useEffect(() => {
     const token = localStorage.getItem('access_token');
     // 仅当没有 token 时跳转登录；有 token 即使暂时拉不到用户，也允许进入页面
@@ -452,6 +489,12 @@ const HomePage = () => {
 
   // 轮询任务状态
   useEffect(() => {
+    // 安全兜底：一旦拿到 taskId，就立即释放按钮 loading，避免按钮被占用
+    // 轮询继续在后台进行
+    if (taskId) {
+      setIsGenerating(false);
+    }
+
     if (taskId) {
       const checkStatus = async () => {
         try {
@@ -608,6 +651,7 @@ const HomePage = () => {
       const id = Math.random().toString(36).slice(2);
       const newJob: Job = {
         id,
+        module: 'veo',
         model: selectedModel as Job['model'],
         prompt,
         aspect_ratio: aspectRatio,
@@ -617,7 +661,9 @@ const HomePage = () => {
       };
       setJobs(prev => [newJob, ...prev]);
       setSnackbarMsg('任务已加入队列');
-      setSnackbarOpen(true);
+  setSnackbarOpen(true);
+  // 队列提交成功后，不阻塞按钮，允许继续发起其他请求
+  setIsGenerating(false);
       return;
     }
 
@@ -669,18 +715,37 @@ const HomePage = () => {
       setJobs(prev => [newJob, ...prev]);
       setSnackbarMsg('任务已加入队列');
       setSnackbarOpen(true);
+      // 队列提交成功后，释放按钮占用；后续由任务卡片 + 轮询驱动
+      setIsGenerating(false);
       return;
     } else if (currentModule === 'sora' && activeTab === 'sora2-text') {
-      // 改为走后端代理，避免在前端暴露外部 Key
-      endpoint = '/api/proxy/sora-text/generate';
-      payload = {
+      // 改为队列模式：允许并行最多3个，统一由 submitNext 异步提交
+      const reqKey = mkKey({ module: 'sora', model: 'sora2-text', prompt, aspectRatio, duration, size });
+      const now = Date.now();
+      if (lastReqKeyRef.current === reqKey && (now - lastReqAtRef.current) < 5000) {
+        setSnackbarMsg('短时间内重复提交，已忽略');
+        setSnackbarOpen(true);
+        setIsGenerating(false);
+        return;
+      }
+      lastReqKeyRef.current = reqKey; lastReqAtRef.current = now;
+      const id = Math.random().toString(36).slice(2);
+      const newJob: Job = {
+        id,
+        module: 'sora',
+        model: 'sora2-text' as any,
         prompt,
-        model: soraTextModel,
-        aspectRatio: aspectRatio,
-        duration: duration,
-        size: size
-      } as any;
-      // 后续统一走下方的通用提交逻辑
+        aspect_ratio: aspectRatio,
+        duration,
+        size,
+        status: 'queued',
+        createdAt: Date.now()
+      };
+      setJobs(prev => [newJob, ...prev]);
+      setSnackbarMsg('任务已加入队列');
+      setSnackbarOpen(true);
+      setIsGenerating(false);
+      return;
     } else if (currentModule === 'nano') {
       endpoint = '/api/proxy/nano/generate';
       payload = {
@@ -700,6 +765,21 @@ const HomePage = () => {
         return;
       }
       lastReqKeyRef.current = reqKey; lastReqAtRef.current = now;
+      // 为 Nano 也插入一个“运行中”占位任务到历史列表中，便于在任何模块下可见
+      const nanoPendingId = Math.random().toString(36).slice(2);
+      const nanoPendingJob: Job = {
+        id: nanoPendingId,
+        module: 'nano',
+        model: nanoModel as Job['model'],
+        prompt,
+        aspect_ratio: aspectRatio,
+        images: nanoImages.length ? nanoImages : undefined,
+        status: 'running',
+        createdAt: Date.now()
+      };
+      setJobs(prev => [nanoPendingJob, ...prev]);
+      // 把占位ID临时挂到 payload 上，供后续成功/失败时更新（局部变量在 try/catch 中也可访问）
+      (payload as any)._nanoPendingId = nanoPendingId;
     } else {
       endpoint = '/api/generate/video';
 
@@ -745,34 +825,77 @@ const HomePage = () => {
       const data = await res.json();
 
       if (currentModule === 'nano') {
-        // Nano 直接返回结果
-        const resultWithModel = { ...data, _model: currentModelName };
-        // 去重：如果返回的是数组图片，过滤相同 URL
+        // Nano 直接返回结果，同时把历史“运行中”占位替换为成功卡片（可能返回多张）
+        const resultWithModel = { ...data, _model: currentModelName } as any;
+        const pendingId = (payload as any)._nanoPendingId as string | undefined;
+        // 规范化为数组 URL 列表
+        let urls: string[] = [];
         if (Array.isArray(resultWithModel?.data)) {
-          const seen = new Set<string>();
-          resultWithModel.data = resultWithModel.data.filter((it: any) => {
-            const u = it?.url || it?.image_url || it;
-            if (!u) return true;
-            const k = String(u);
-            if (seen.has(k)) return false;
-            seen.add(k);
-            return true;
-          });
+          urls = resultWithModel.data.map((it: any) => it?.url || it?.image_url || it).filter(Boolean);
+        } else {
+          const u = resultWithModel?.data?.url || resultWithModel?.image_url || resultWithModel?.url;
+          if (u) urls = [u];
         }
+        // 去重
+        const seen = new Set<string>();
+        urls = urls.filter(u => { const k = String(u); if (seen.has(k)) return false; seen.add(k); return true; });
+
+        setJobs(prev => {
+          // 删除占位卡
+          const withoutPending = pendingId ? prev.filter(j => j.id !== pendingId) : prev.slice();
+          // 追加成功卡（多图则拆分为多条）
+          const successJobs: Job[] = urls.length ? urls.map(u => ({
+            id: Math.random().toString(36).slice(2),
+            module: 'nano',
+            model: nanoModel as Job['model'],
+            prompt,
+            aspect_ratio: aspectRatio,
+            status: 'succeeded',
+            createdAt: Date.now(),
+            result: { image_url: u, raw: resultWithModel }
+          })) : pendingId ? [{
+            id: pendingId,
+            module: 'nano',
+            model: nanoModel as Job['model'],
+            prompt,
+            aspect_ratio: aspectRatio,
+            status: 'succeeded',
+            createdAt: Date.now(),
+            result: { raw: resultWithModel }
+          } as Job] : [];
+          return [...successJobs, ...withoutPending];
+        });
+
         setGenerationResult(resultWithModel);
         setIsGenerating(false);
         setSnackbarMsg('图片生成成功！');
         setSnackbarOpen(true);
       } else {
-        setTaskId(data.task_id);
+  setTaskId(data.task_id);
+  // 已拿到任务ID，改为异步轮询，不再占用按钮的“生成中”状态
+  setIsGenerating(false);
         setSnackbarMsg('任务已提交，正在生成中...');
         setSnackbarOpen(true);
       }
 
     } catch (error: any) {
       setIsGenerating(false);
-      setSnackbarMsg(error.message);
+      // 统一对用户的异常说明（含 Nano 接口异常的文案）
+      const msg = (currentModule === 'nano')
+        ? `Nano API 请求异常：${error?.message || '请稍后重试'}`
+        : (error?.message || '请求失败');
+      setSnackbarMsg(msg);
       setSnackbarOpen(true);
+      // Nano 失败：直接移除“运行中”占位卡片，不在历史区保留失败卡；同时无需轮询
+      if (currentModule === 'nano') {
+        const pendingId = (payload as any)?._nanoPendingId as string | undefined;
+        if (pendingId) {
+          setJobs(prev => prev.filter(j => j.id !== pendingId));
+        }
+      }
+    } finally {
+      // 双保险：任何情况下都解除按钮占用；对于需要轮询的任务，taskId 控制显示卡片即可
+      setIsGenerating(false);
     }
   };
 
@@ -838,19 +961,16 @@ const HomePage = () => {
         }
       }}>
         {/* 1. 顶部导航栏 */}
-        <AppBar
-          position="static"
-          color="transparent"
+      <AppBar
+          position="sticky"
           elevation={0}
           sx={{
-            // 背景改为淡蓝渐变，营造水体感
-            background: 'linear-gradient(90deg, #eff6ff 0%, #dbeafe 50%, #eff6ff 100%)',
-            backgroundSize: '200% 200%',
-            animation: 'gradientFlow 15s ease infinite',
+            bgcolor: '#eff6ff',
+
             backdropFilter: 'blur(12px)',
             borderBottom: '1px solid #bfdbfe',
             position: 'relative',
-            overflow: 'hidden',
+                        overflow: 'hidden',
             zIndex: 1,
             '&::before': {
               content: '""',
@@ -878,6 +998,7 @@ const HomePage = () => {
               pointerEvents: 'none',
               zIndex: 0
             }
+
           }}
         >
           <Toolbar sx={{ position: 'relative', zIndex: 1 }}>
@@ -904,28 +1025,72 @@ const HomePage = () => {
                 会员套餐
               </Button>
 
-              <Box display="flex" alignItems="center" gap={1}>
-                <Typography variant="subtitle2" sx={{ color: '#1e293b', display: { xs: 'none', sm: 'block' } }}>
-                  {user?.username}
-                </Typography>
-                <IconButton onClick={handleMenu} sx={{ p: 0 }}>
-                  <Avatar sx={{ bgcolor: '#2563eb', width: 40, height: 40 }}>
-                    {user?.username?.charAt(0).toUpperCase()}
+              <Box 
+                display="flex" 
+                alignItems="center" 
+                gap={1}
+                onMouseEnter={handleMenu}
+                sx={{ position: 'relative' }}
+              >
+                <Box sx={{ p: 0, cursor: 'pointer' }}>
+                  <Avatar sx={{ bgcolor: '#2563eb', width: 32, height: 32, fontSize: '0.9rem' }}>
+                    {loading ? '...' : (user?.username ? user.username.charAt(0).toUpperCase() : 'U')}
                   </Avatar>
-                </IconButton>
+                </Box>
                 <Menu
                   id="menu-appbar"
                   anchorEl={anchorEl}
                   anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
-                  keepMounted
                   transformOrigin={{ vertical: 'top', horizontal: 'right' }}
                   open={Boolean(anchorEl)}
                   onClose={handleClose}
+                  MenuListProps={{
+                    onMouseLeave: handleClose,
+                  }}
+                  PaperProps={{
+                    elevation: 3,
+                    sx: {
+                      overflow: 'visible',
+                      filter: 'drop-shadow(0px 2px 8px rgba(0,0,0,0.08))',
+                      mt: 0.5,
+                      borderRadius: 0.5,
+                      minWidth: 140,
+                      bgcolor: 'white',
+                    },
+                  }}
                 >
-                  <MenuItem onClick={handleClose}>个人中心</MenuItem>
-                  <MenuItem onClick={handleLogout}>
-                    <ListItemIcon><LogoutIcon fontSize="small" /></ListItemIcon>
-                    退出登录
+                  <Box sx={{ px: 2, py: 1.2 }}>
+                    <Typography variant="body1" sx={{ color: '#1e293b', fontWeight: 700, mb: 0.3, fontSize: '0.95rem' }}>
+                      {loading ? '加载中...' : (user?.username || '未登录用户')}
+                    </Typography>
+                    <Typography variant="caption" sx={{ color: '#94a3b8', fontSize: '0.75rem', display: 'block' }}>
+                      {loading ? '...' : (user?.email || '未绑定邮箱')}
+                    </Typography>
+                  </Box>
+                  
+                  <Divider sx={{ my: 0 }} />
+
+                  <Box sx={{ px: 2, py: 1.5 }}>
+                    <Box sx={{ 
+                      display: 'flex', 
+                      justifyContent: 'space-between', 
+                      alignItems: 'center',
+                      bgcolor: '#f8fafc',
+                      px: 1.5,
+                      py: 0.8,
+                      borderRadius: 1.5,
+                      border: '1px solid #f1f5f9'
+                    }}>
+                      <Typography sx={{ color: '#64748b', fontSize: '0.75rem', fontWeight: 600 }}>积分</Typography>
+                      <Typography sx={{ color: '#2563eb', fontSize: '0.85rem', fontWeight: 800 }}>{user?.points || 0}</Typography>
+                    </Box>
+                  </Box>
+                  
+                  <MenuItem onClick={() => { handleClose(); navigate('/profile'); }} sx={{ py: 0.8, px: 2, fontSize: '0.75rem', minHeight: 'auto' }}>
+                    <Typography variant="body2" sx={{ color: '#334155', fontWeight: 500, fontSize: '0.75rem' }}>个人中心（积分购买）</Typography>
+                  </MenuItem>
+                  <MenuItem onClick={handleLogout} sx={{ py: 0.8, px: 2, fontSize: '0.75rem', minHeight: 'auto' }}>
+                    <Typography variant="body2" sx={{ color: '#ef4444', fontWeight: 500, fontSize: '0.75rem' }}>退出登录</Typography>
                   </MenuItem>
                 </Menu>
               </Box>
@@ -1868,15 +2033,15 @@ const HomePage = () => {
                         variant="contained"
                         size="large"
                         onClick={handleGenerate}
-                        disabled={isGenerating}
-                        startIcon={isGenerating ? <CircularProgress size={20} color="inherit" /> : <PlayCircleOutlineIcon />}
+                        disabled={isSubmitting}
+                        startIcon={isSubmitting ? <CircularProgress size={20} color="inherit" /> : <PlayCircleOutlineIcon />}
                         sx={{
                           px: 4,
                           background: 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)',
                           boxShadow: '0 4px 12px rgba(37,99,235,0.3)'
                         }}
                       >
-                        {isGenerating ? 'Generating...' : 'Generate'}
+                        {isSubmitting ? 'Generating...' : 'Generate'}
                       </Button>
                     </Box>
                   </Box>
@@ -1967,8 +2132,10 @@ const HomePage = () => {
 
                   {/* 统一结果展示区域：Grid 布局 */}
                   <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr', lg: '1fr 1fr 1fr' }, gap: 2 }}>
-                    {/* 1. 当前生成任务或最近成功任务（跨模块显示） */}
+                    {/* 1. 当前生成任务或最近成功任务（统一隐藏，全部用队列卡片展示，保证三模块表现一致） */}
                     {(() => {
+                      // 统一不用单独“当前卡片”，保持三模块一致，仅展示下方队列卡片
+                      return null;
                       // 计算最近一个可展示的视频：优先当前 generationResult；否则最近成功的队列任务
                       const latestSucceededJob = jobs.find(j => j.status === 'succeeded' && j.result?.video_url);
                       const hasCurrent = Boolean(generationResult);
@@ -1977,9 +2144,10 @@ const HomePage = () => {
                           ? generationResult.data.output
                           : (generationResult?.data?.video_url || generationResult?.video_url)
                         : latestSucceededJob?.result?.video_url;
-                      const showCard = isGenerating || hasCurrent || Boolean(videoSrcStr);
+                      // 非 Sora 标签：按常规逻辑显示当前卡片
+                      const showCard = (isGenerating || hasCurrent || Boolean(videoSrcStr));
                       if (!showCard) return null;
-                      const modelLabel = isGenerating
+                      const modelLabel = (taskId || isGenerating)
                         ? generatingModelRef.current
                         : (generationResult?._model || latestSucceededJob?.model || '');
                       return (
@@ -2002,8 +2170,23 @@ const HomePage = () => {
                             className="delete-btn"
                             aria-label="删除"
                             onClick={() => {
-                              // 清空当前结果展示
+                              // 取消当前查询与UI显示
+                              // 1) 停止轮询
+                              if (pollTimerRef.current) {
+                                clearInterval(pollTimerRef.current);
+                                pollTimerRef.current = null;
+                              }
+                              pollingActiveRef.current = false;
+                              // 2) 清除当前任务状态
+                              setTaskId(null);
+                              setIsGenerating(false);
+                              // 3) 清空当前结果卡片
                               setGenerationResult(null);
+                              // 4) 可选：标记队列中运行的任务为已取消（不强制删除，避免历史丢失）
+                              setJobs(prev => prev.map(j => j.status === 'running' && j.taskId ? { ...j, status: 'failed', error: '用户已取消' } : j));
+                              // 5) 反馈
+                              setSnackbarMsg('已取消查询');
+                              setSnackbarOpen(true);
                             }}
                             sx={{
                               position: 'absolute',
@@ -2049,7 +2232,7 @@ const HomePage = () => {
                             />
                           )}
 
-                          {isGenerating ? (
+                          {(Boolean(taskId) && !generationResult) ? (
                             <Box
                               sx={{
                                 position: 'relative',
@@ -2075,7 +2258,7 @@ const HomePage = () => {
                                   zIndex: 1,
                                   color: 'rgba(255,255,255,0.85)',
                                   letterSpacing: 1,
-                                  animation: `${blink} 1.2s ease-in-out infinite`,
+                                  animation: `${blink} 2.4s ease-in-out infinite`,
                                 }}
                               >
                                 正在生成...
@@ -2103,23 +2286,18 @@ const HomePage = () => {
                       );
                     })()}
 
-                    {/* 2. 历史记录卡片（Veo/Sora 队列） */}
-                    {(currentModule === 'veo' || currentModule === 'sora') && !isGenerating && (() => {
+                    {/* 2. 历史记录卡片（在任意模型下显示，不再按模块过滤） */}
+                    {(() => {
                       // 基于 URL 去重，避免同一视频/图片重复显示
                       const seen = new Set<string>();
                       // 当存在“当前生成卡片”时，避免列表再展示进行中的占位（queued/submitting/running）
                       const isShowingCurrentCard = isGenerating || Boolean(generationResult);
                       const deduped = jobs
-                        .filter(j => {
-                          if (isShowingCurrentCard && (j.status === 'queued' || j.status === 'submitting' || j.status === 'running')) {
-                            return false; // 进行中的占位交由“当前卡片”呈现，历史列表不再冗余展示
-                          }
-                          // 当当前卡片展示时，历史列表不再显示无结果的占位（即没有 video_url/image_url 的卡片）
-                          if (isShowingCurrentCard && !j.result?.video_url && !j.result?.image_url) {
-                            return false;
-                          }
-                          return true;
-                        })
+                        // 不再按模块过滤，所有模块（veo/sora/nano）的历史都展示
+                        .filter(() => true)
+                        // 过滤 Sora/Nano 的失败任务：失败即取消 UI（Nano 失败卡直接不展示）
+                        .filter(j => !((j.module === 'sora' || j.module === 'nano') && j.status === 'failed'))
+                        // 对已成功的直链做去重
                         .filter(j => {
                         const url = j.result?.video_url || j.result?.image_url || '';
                           if (!url) return true; // 保留已完成但尚未解析到直链的记录（若存在）
@@ -2147,7 +2325,15 @@ const HomePage = () => {
                            <IconButton
                              className="delete-btn"
                                  aria-label="删除"
-                                 onClick={() => setJobs(prev => prev.filter(j => j.id !== job.id))}
+                                 onClick={() => {
+                                   // 全局同步删除：同一资源（相同 video_url / image_url）的所有卡片一起移除
+                                   const keyUrl = job.result?.video_url || job.result?.image_url || '';
+                                   setJobs(prev => prev.filter(j => {
+                                     const url = j.result?.video_url || j.result?.image_url || '';
+                                     if (keyUrl) return url !== keyUrl; // 删除同源资源
+                                     return j.id !== job.id; // 无直链则按 id 删除
+                                   }));
+                                 }}
                                  sx={{
                                    position: 'absolute',
                                    top: 6,
@@ -2216,18 +2402,56 @@ const HomePage = () => {
                                 }
                               }}
                             >
-                              <Typography
-                                variant="subtitle2"
-                                sx={{
-                                  position: 'relative',
-                                  zIndex: 1,
-                                  color: 'rgba(255,255,255,0.85)',
-                                  letterSpacing: 1,
-                                  animation: `${blink} 1.2s ease-in-out infinite`,
-                                }}
-                              >
-                                正在生成...
-                              </Typography>
+                              {job.status === 'failed' ? (
+                                <Typography
+                                  variant="subtitle2"
+                                  sx={{
+                                    position: 'relative',
+                                    zIndex: 1,
+                                    color: 'error.main',
+                                    letterSpacing: 0.5,
+                                    fontWeight: 600,
+                                    background: 'rgba(239,68,68,0.15)',
+                                    border: '1px solid rgba(239,68,68,0.5)',
+                                    borderRadius: 1,
+                                    px: 1.5,
+                                    py: 0.5
+                                  }}
+                                >
+                                  {job.error || '生成失败'}
+                                </Typography>
+                              ) : job.status === 'succeeded' ? (
+                                <Typography
+                                  variant="subtitle2"
+                                  sx={{
+                                    position: 'relative',
+                                    zIndex: 1,
+                                    color: 'success.main',
+                                    letterSpacing: 0.5,
+                                    fontWeight: 600,
+                                    background: 'rgba(16,185,129,0.15)',
+                                    border: '1px solid rgba(16,185,129,0.5)',
+                                    borderRadius: 1,
+                                    px: 1.5,
+                                    py: 0.5
+                                  }}
+                                >
+                                  完成
+                                </Typography>
+                              ) : (
+                                <Typography
+                                  variant="subtitle2"
+                                  sx={{
+                                    position: 'relative',
+                                    zIndex: 1,
+                                    color: 'rgba(255,255,255,0.85)',
+                                    letterSpacing: 1,
+                                    animation: `${blink} 2.4s ease-in-out infinite`,
+                                  }}
+                                >
+                                  正在生成...
+                                </Typography>
+                              )}
                             </Box>
                           )}
                         </Box>

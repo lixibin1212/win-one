@@ -984,10 +984,12 @@ async def login_google(
 async def get_me(user = Depends(get_current_user)):
     """获取当前用户信息"""
     return {
+        "id": str(user['id']),
         "username": user['username'],
         "email": user['email'],
         "role": user['role'],
         "points": user['points'],
+        "identity": user.get('identity', 'free'),
         "email_verified": user['email_verified'],
         "created_at": user['created_at']
     }

@@ -6,6 +6,7 @@ import AuthOverlay from './AuthOverlay';
 import LandingPage from './LandingPage';
 import HomePage from './HomePage';
 import PricingPage from './PricingPage';
+import ProfilePage from './ProfilePage';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { AuthProvider } from './AuthContext';
 import { GoogleOAuthProvider } from '@react-oauth/google';
@@ -20,6 +21,7 @@ const app = (
           <Route path="/login" element={<AuthOverlay />} />
           <Route path="/home" element={<HomePage />} />
           <Route path="/pricing" element={<PricingPage />} />
+          <Route path="/profile" element={<ProfilePage />} />
         </Routes>
       </BrowserRouter>
     </AuthProvider>

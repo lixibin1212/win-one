@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import {
   Box,
   Button,
@@ -39,6 +39,7 @@ import PlayCircleOutlineIcon from '@mui/icons-material/PlayCircleOutline';
 import PhotoLibraryIcon from '@mui/icons-material/PhotoLibrary';
 import AddPhotoAlternateIcon from '@mui/icons-material/AddPhotoAlternate';
 import CloseIcon from '@mui/icons-material/Close';
+import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
 import { createClient } from '@supabase/supabase-js';
 import ThreeDCarousel from './ThreeDCarousel';
 import { useAuth } from './AuthContext';
@@ -203,6 +204,7 @@ const SUPABASE_BUCKET = 'Vwin';
 
 const HomePage = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
 
   // 标签页状态
@@ -1007,23 +1009,114 @@ const HomePage = () => {
             </Typography>
 
             <Box display="flex" alignItems="center" gap={2}>
-              <Button 
-                onClick={() => navigate('/pricing')}
-                sx={{ 
-                  color: '#ffffff', 
-                  fontWeight: 600,
-                  mr: 2,
-                  textShadow: '1px 1px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000',
-                  transition: 'all 0.3s',
-                  '&:hover': { 
-                    bgcolor: 'transparent',
-                    transform: 'scale(1.2)',
-                    textShadow: '1px 1px 0 #000, 3px 3px 0px rgba(0,0,0,0.5)',
-                  }
-                }}
-              >
-                会员套餐
-              </Button>
+              {/* 主页 + 优创 + 会员套餐 导航项；主页样式与优创一致 */}
+              <Box display="flex" alignItems="center" gap={2}>
+                <Button 
+                  onClick={() => navigate('/home')}
+                  sx={{ 
+                    color: '#ffffff', 
+                    fontWeight: 600,
+                    minWidth: 'auto',
+                    px: 1.5,
+                    transition: 'all 0.3s',
+                    transform: location.pathname === '/home' ? 'scale(1.2)' : 'scale(1)',
+                    textShadow: location.pathname === '/home' 
+                      ? '1px 1px 0 #000, 3px 3px 0px rgba(0,0,0,0.5)' 
+                      : '1px 1px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000',
+                    '&:hover': { 
+                      bgcolor: 'transparent',
+                      transform: 'scale(1.2)',
+                      textShadow: '1px 1px 0 #000, 3px 3px 0px rgba(0,0,0,0.5)',
+                    }
+                  }}
+                >
+                  <Box sx={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}>
+                    主页
+                    {location.pathname === '/home' && (
+                      <AutoAwesomeIcon 
+                        sx={{ 
+                          position: 'absolute', 
+                          bottom: -2, 
+                          right: -14, 
+                          fontSize: 14, 
+                          color: '#ffd700',
+                          filter: 'drop-shadow(0 0 2px rgba(0,0,0,0.5))'
+                        }} 
+                      />
+                    )}
+                  </Box>
+                </Button>
+                <Button 
+                  onClick={() => navigate('/news')}
+                  sx={{ 
+                    color: '#ffffff', 
+                    fontWeight: 600,
+                    minWidth: 'auto',
+                    px: 1.5,
+                    transition: 'all 0.3s',
+                    transform: location.pathname === '/news' ? 'scale(1.2)' : 'scale(1)',
+                    textShadow: location.pathname === '/news' 
+                      ? '1px 1px 0 #000, 3px 3px 0px rgba(0,0,0,0.5)' 
+                      : '1px 1px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000',
+                    '&:hover': { 
+                      bgcolor: 'transparent',
+                      transform: 'scale(1.2)',
+                      textShadow: '1px 1px 0 #000, 3px 3px 0px rgba(0,0,0,0.5)',
+                    }
+                  }}
+                >
+                  <Box sx={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}>
+                    优选
+                    {location.pathname === '/news' && (
+                      <AutoAwesomeIcon 
+                        sx={{ 
+                          position: 'absolute', 
+                          bottom: -2, 
+                          right: -14, 
+                          fontSize: 14, 
+                          color: '#ffd700',
+                          filter: 'drop-shadow(0 0 2px rgba(0,0,0,0.5))'
+                        }} 
+                      />
+                    )}
+                  </Box>
+                </Button>
+                <Button 
+                  onClick={() => navigate('/pricing')}
+                  sx={{ 
+                    color: '#ffffff', 
+                    fontWeight: 600,
+                    minWidth: 'auto',
+                    px: 1.5,
+                    transition: 'all 0.3s',
+                    transform: location.pathname === '/pricing' ? 'scale(1.2)' : 'scale(1)',
+                    textShadow: location.pathname === '/pricing' 
+                      ? '1px 1px 0 #000, 3px 3px 0px rgba(0,0,0,0.5)' 
+                      : '1px 1px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000',
+                    '&:hover': { 
+                      bgcolor: 'transparent',
+                      transform: 'scale(1.2)',
+                      textShadow: '1px 1px 0 #000, 3px 3px 0px rgba(0,0,0,0.5)',
+                    }
+                  }}
+                >
+                  <Box sx={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}>
+                    会员套餐
+                    {location.pathname === '/pricing' && (
+                      <AutoAwesomeIcon 
+                        sx={{ 
+                          position: 'absolute', 
+                          bottom: -2, 
+                          right: -14, 
+                          fontSize: 14, 
+                          color: '#ffd700',
+                          filter: 'drop-shadow(0 0 2px rgba(0,0,0,0.5))'
+                        }} 
+                      />
+                    )}
+                  </Box>
+                </Button>
+              </Box>
 
               <Box 
                 display="flex" 
@@ -2289,7 +2382,7 @@ const HomePage = () => {
                     {/* 2. 历史记录卡片（在任意模型下显示，不再按模块过滤） */}
                     {(() => {
                       // 基于 URL 去重，避免同一视频/图片重复显示
-                      const seen = new Set<string>();
+                      const seen = new Set();
                       // 当存在“当前生成卡片”时，避免列表再展示进行中的占位（queued/submitting/running）
                       const isShowingCurrentCard = isGenerating || Boolean(generationResult);
                       const deduped = jobs

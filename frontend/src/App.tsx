@@ -20,6 +20,7 @@ import LockOpenIcon from '@mui/icons-material/LockOpen';
 import PersonIcon from '@mui/icons-material/Person';
 import ShieldIcon from '@mui/icons-material/Shield';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+import { useAuth } from './AuthContext';
 
 const theme = createTheme({
   palette: {
@@ -85,6 +86,7 @@ type PageType = 'login' | 'register' | 'home' | 'verify-email' | 'verify-pending
 
 const App = () => {
   const navigate = useNavigate();
+  const { refreshUser } = useAuth();
   const [page, setPage] = useState<PageType>('login');
   const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
@@ -98,6 +100,17 @@ const App = () => {
   const [captchaToken, setCaptchaToken] = useState<string | null>(null);
   const [suspiciousLogin, setSuspiciousLogin] = useState(false);
   const captchaRef = useRef<HCaptcha>(null);
+  // Google 脚本加载就绪检测（避免按钮区域空白）
+  const [googleReady, setGoogleReady] = useState(false);
+  useEffect(() => {
+    const check = () => {
+      const ready = !!(window as any)?.google?.accounts?.id;
+      setGoogleReady(ready);
+    };
+    check();
+    const timer = setInterval(check, 1000);
+    return () => clearInterval(timer);
+  }, []);
 
   // 密码强度验证
   const validatePassword = (pwd: string): string | null => {
@@ -281,6 +294,9 @@ const App = () => {
         setSuspiciousLogin(true);
       }
 
+      // 刷新全局用户上下文，避免必须刷新页面才显示用户名/积分
+      try { await refreshUser(); } catch {}
+
       // 获取用户信息（更严格的错误处理，便于定位问题）
       let userRes: Response;
       try {
@@ -425,6 +441,9 @@ const App = () => {
 
       localStorage.setItem('access_token', data.access_token);
 
+  // 刷新上下文，确保首页右上角立即显示用户名与积分
+  try { await refreshUser(); } catch {}
+
       // 获取用户信息
       const userRes = await fetch(`${API_BASE}/me`, {
         headers: { Authorization: `Bearer ${data.access_token}` },
@@ -524,7 +543,7 @@ const App = () => {
             justifyContent: 'center',
           }}
         >
-          <Paper elevation={24} sx={{ ...glassBg, minWidth: 340, maxWidth: 500 }}>
+          <Paper elevation={24} sx={{ ...glassBg, minWidth: 380, maxWidth: 500 }}>
             <Box textAlign="center">
               <Avatar sx={{ bgcolor: '#2563eb', width: 64, height: 64, mx: 'auto', mb: 2 }}>
                 <EmailIcon fontSize="large" />
@@ -577,7 +596,7 @@ const App = () => {
             justifyContent: 'center',
           }}
         >
-          <Paper elevation={24} sx={{ ...glassBg, minWidth: 340, maxWidth: 400 }}>
+          <Paper elevation={24} sx={{ ...glassBg, minWidth: 380, maxWidth: 500 }}>
             <Box textAlign="center">
               {loading ? (
                 <>
@@ -692,7 +711,7 @@ const App = () => {
             justifyContent: 'center',
           }}
         >
-          <Paper elevation={24} sx={{ ...glassBg, minWidth: 340, maxWidth: 450 }}>
+          <Paper elevation={24} sx={{ ...glassBg, minWidth: 380, maxWidth: 500 }}>
             <Box textAlign="center" mb={3}>
               <Avatar sx={{ bgcolor: '#2964d4', width: 56, height: 56, mx: 'auto', mb: 2 }}>
                 <EmailIcon />
@@ -763,7 +782,7 @@ const App = () => {
             justifyContent: 'center',
           }}
         >
-          <Paper elevation={24} sx={{ ...glassBg, minWidth: 340, maxWidth: 450 }}>
+          <Paper elevation={24} sx={{ ...glassBg, minWidth: 380, maxWidth: 500 }}>
             <Box textAlign="center" mb={3}>
               <Avatar sx={{ bgcolor: '#2964d4', width: 56, height: 56, mx: 'auto', mb: 2 }}>
                 <LockOpenIcon />
@@ -844,12 +863,12 @@ const App = () => {
             // 响应式宽度：在更大屏幕稍微放宽，保持视觉平衡
             width: {
               xs: '92%',    // 手机基本占满，留少量边距
-              sm: 290,      // 小屏（≥600px）
-              md: 300,      // 中屏（≥900px）
-              lg: 320,      // 大屏（≥1200px）
-              xl: 360       // 超大屏（≥1536px）
+              sm: 360,      // 小屏（≥600px）
+              md: 380,      // 中屏（≥900px）
+              lg: 400,      // 大屏（≥1200px）
+              xl: 420       // 超大屏（≥1536px）
             },
-            maxWidth: 440, // 双保险，防止极端情况过宽
+            maxWidth: 500, // 双保险，防止极端情况过宽
             // 根据屏幕尺寸调整内边距，保证内容密度合适
             p: {
               xs: '40px 30px 36px', // 移动端更紧凑
@@ -872,17 +891,28 @@ const App = () => {
             {page === 'register' ? '注册新账号' : '登录系统'}
           </Typography>
 
-          {/* Google 登录 */}
-          <Box width="100%" display="flex" flexDirection="column" alignItems="center" gap={2}>
-            <GoogleLogin
-              onSuccess={handleGoogleLogin}
-              onError={() => setError('Google登录失败')}
-              useOneTap
-            />
-            <Divider sx={{ width: '100%', mt: 1, mb: 0.5 }}>
-              <Box component="span" sx={{ color: '#64748b' }}>或使用用户名{page === 'register' ? '注册' : '登录'}</Box>
-            </Divider>
-          </Box>
+          {/* Google 登录（脚本加载失败时显示回退提示，避免空白占位）*/}
+          {googleReady ? (
+            <Box width="100%" display="flex" flexDirection="column" alignItems="center" gap={2}>
+              <GoogleLogin
+                onSuccess={handleGoogleLogin}
+                onError={() => setError('Google登录失败')}
+                useOneTap
+              />
+              <Divider sx={{ width: '100%', mt: 1, mb: 0.5 }}>
+                <Box component="span" sx={{ color: '#64748b' }}>或使用用户名{page === 'register' ? '注册' : '登录'}</Box>
+              </Divider>
+            </Box>
+          ) : (
+            <Box width="100%" display="flex" flexDirection="column" alignItems="center" gap={1.5}>
+              <Alert severity="info" sx={{ width: '100%' }}>
+                Google 登录暂不可用（脚本未加载）。请使用用户名{page === 'register' ? '注册' : '登录'}，或检查网络/浏览器扩展是否拦截了 accounts.google.com。
+              </Alert>
+              <Divider sx={{ width: '100%', mt: 0.5, mb: 0.5 }}>
+                <Box component="span" sx={{ color: '#64748b' }}>继续使用用户名{page === 'register' ? '注册' : '登录'}</Box>
+              </Divider>
+            </Box>
+          )}
 
           {/* 注册专用：用户名 */}
           {page === 'register' && (

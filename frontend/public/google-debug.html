@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Google 登录脚本诊断</title>
+  <style>
+    body{font-family:system-ui,Arial;padding:20px;}
+    code,pre{background:#f7f7f7;border-radius:8px;padding:8px;}
+    .ok{color:#16a34a}.warn{color:#ca8a04}.err{color:#dc2626}
+  </style>
+</head>
+<body>
+  <h1>Google 登录脚本诊断</h1>
+  <p>此页面会尝试加载 <code>https://accounts.google.com/gsi/client</code> 并显示状态。</p>
+  <ol>
+    <li>如果脚本加载失败，多数是网络/扩展拦截所致。</li>
+    <li>如果加载成功但初始化失败，可能是第三方 Cookie、CSP 或客户端配置问题。</li>
+  </ol>
+
+  <h2>结果</h2>
+  <pre id="log"></pre>
+
+  <script>
+    const log = document.getElementById('log');
+    const add = (msg, cls='') => { log.innerHTML += (cls?`<span class="${cls}">`:'') + msg + (cls?'</span>':'') + '\n'; };
+
+    add('[开始] 尝试加载 Google Identity 脚本...');
+
+    const s = document.createElement('script');
+    s.src = 'https://accounts.google.com/gsi/client';
+    s.async = true;
+    s.defer = true;
+    s.onerror = () => add('❌ 脚本加载失败：无法访问 accounts.google.com（被网络或扩展拦截）', 'err');
+    s.onload = () => {
+      add('✅ 脚本加载成功', 'ok');
+      const google = window.google;
+      if (!google || !google.accounts || !google.accounts.id) {
+        add('⚠️ window.google.accounts.id 不存在：初始化接口不可用', 'warn');
+      } else {
+        add('✅ window.google.accounts.id 可用', 'ok');
+        try {
+          google.accounts.id.initialize({
+            client_id: '247193530706-lscvo9tovkvdnj54e6ak15eum5ubgcbh.apps.googleusercontent.com',
+            callback: (res) => add('回调收到：' + JSON.stringify(res).slice(0,200) + '...', 'ok')
+          });
+          add('✅ initialize 调用成功（未渲染按钮，仅测试可用性）', 'ok');
+        } catch (e) {
+          add('❌ initialize 调用失败：' + e.message, 'err');
+        }
+      }
+    };
+    document.head.appendChild(s);
+  </script>
+</body>
+</html>

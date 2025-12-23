@@ -1,0 +1,70 @@
+.logo-carousel-container {
+  width: 100%;
+  overflow: hidden;
+  /* Vertical gradient to blend from page blue to white and back to blue */
+  background: linear-gradient(
+    to bottom, 
+    #eff6ff 0%, 
+    #ffffff 25%, 
+    #ffffff 75%, 
+    #eff6ff 100%
+  );
+  padding: 60px 0;
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.logo-carousel-track {
+  display: flex;
+  width: calc(250px * 18); /* Adjust based on logo count and width */
+  animation: scroll 30s linear infinite;
+  /* Use mask-image to fade logos at edges without affecting background */
+  -webkit-mask-image: linear-gradient(
+    to right, 
+    transparent 0%, 
+    black 15%, 
+    black 85%, 
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to right, 
+    transparent 0%, 
+    black 15%, 
+    black 85%, 
+    transparent 100%
+  );
+}
+
+.logo-item {
+  width: 250px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 0 40px;
+  flex-shrink: 0;
+}
+
+.logo-image {
+  max-width: 150px;
+  max-height: 40px;
+  filter: grayscale(100%); /* Changed from invert to grayscale for white background */
+  opacity: 0.5;
+  transition: all 0.3s ease;
+}
+
+.logo-image:hover {
+  opacity: 1;
+  filter: grayscale(0%); /* Show original colors on hover */
+}
+
+@keyframes scroll {
+  0% {
+    transform: translateX(0);
+  }
+  100% {
+    transform: translateX(calc(-250px * 6)); /* Scroll by one set of logos */
+  }
+}
+
+/* Removed pseudo-elements to fix corner gradient issues */

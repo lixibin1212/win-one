@@ -17,6 +17,7 @@ import {
 import LogoutIcon from '@mui/icons-material/Logout';
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
 import { useAuth } from './AuthContext';
+import LogoCarousel from './LogoCarousel';
 
 const waveMove = keyframes`
   0% { background-position: 0% 50%; }
@@ -245,6 +246,21 @@ const NewsPage: React.FC = () => {
           </Box>
         </Toolbar>
       </AppBar>
+
+      {/* Main Content Area */}
+      <Box 
+        sx={{ 
+          display: 'flex', 
+          flexDirection: 'column', 
+          alignItems: 'center', 
+          justifyContent: 'flex-start',
+          flexGrow: 1,
+          pt: 12, // Position it higher up
+          minHeight: 'calc(100vh - 64px)', // Subtract AppBar height
+        }}
+      >
+        <LogoCarousel />
+      </Box>
     </Box>
   );
 };

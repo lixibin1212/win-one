@@ -1,12 +1,12 @@
 .logo-carousel-container {
   width: 100%;
   overflow: hidden;
-  /* Vertical gradient to blend from page blue to white and back to blue */
+  /* Vertical gradient: light blue -> white -> white -> light blue */
   background: linear-gradient(
     to bottom, 
     #eff6ff 0%, 
-    #ffffff 25%, 
-    #ffffff 75%, 
+    #ffffff 20%, 
+    #ffffff 80%, 
     #eff6ff 100%
   );
   padding: 60px 0;
@@ -15,11 +15,10 @@
   align-items: center;
 }
 
-.logo-carousel-track {
-  display: flex;
-  width: calc(250px * 18); /* Adjust based on logo count and width */
-  animation: scroll 30s linear infinite;
-  /* Use mask-image to fade logos at edges without affecting background */
+.logo-carousel-viewport {
+  width: 100%;
+  overflow: hidden;
+  /* Use mask-image here so only the logos fade, not the white background */
   -webkit-mask-image: linear-gradient(
     to right, 
     transparent 0%, 
@@ -36,35 +35,60 @@
   );
 }
 
+.logo-carousel-track {
+  display: flex;
+  width: fit-content;
+  gap: 400px; /* Space between the two items */
+  animation: scroll 15s linear infinite;
+}
+
 .logo-item {
-  width: 250px;
   display: flex;
   justify-content: center;
   align-items: center;
-  padding: 0 40px;
+  gap: 12px; /* Space between icon and text */
   flex-shrink: 0;
+}
+
+.logo-icon {
+  width: 24px;
+  height: 24px;
+  opacity: 0.6;
+  transition: all 0.3s ease;
+}
+
+.logo-item.active .logo-icon {
+  opacity: 1;
+  transform: scale(1.1);
+}
+
+.logo-item:hover .logo-icon {
+  opacity: 1;
+  transform: scale(1.1);
 }
 
 .logo-image {
   max-width: 150px;
   max-height: 40px;
-  filter: grayscale(100%); /* Changed from invert to grayscale for white background */
+  filter: grayscale(100%);
   opacity: 0.5;
   transition: all 0.3s ease;
 }
 
 .logo-image:hover {
   opacity: 1;
-  filter: grayscale(0%); /* Show original colors on hover */
+  filter: grayscale(0%);
 }
 
 @keyframes scroll {
   0% {
-    transform: translateX(0);
+    /* Start from the right edge of the container */
+    transform: translateX(100vw);
   }
   100% {
-    transform: translateX(calc(-250px * 6)); /* Scroll by one set of logos */
+    /* Move until the entire track is past the left edge */
+    transform: translateX(-100%);
   }
 }
 
-/* Removed pseudo-elements to fix corner gradient issues */
+

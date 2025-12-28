@@ -8,6 +8,8 @@ import HomePage from './HomePage';
 import PricingPage from './PricingPage';
 import ProfilePage from './ProfilePage';
 import NewsPage from './NewsPage';
+import { AiAnimationPage } from './aiAnimation/AiAnimationPage';
+import { AiVideoEditPage } from './aiAnimation/AiVideoEditPage';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { AuthProvider } from './AuthContext';
 import { GoogleOAuthProvider } from '@react-oauth/google';
@@ -25,6 +27,8 @@ const app = (
           <Route path="/" element={<LandingPage />} />
           <Route path="/login" element={<AuthOverlay />} />
           <Route path="/home" element={<HomePage />} />
+          <Route path="/ai-animation" element={<AiAnimationPage />} />
+          <Route path="/ai-video-edit" element={<AiVideoEditPage />} />
           <Route path="/pricing" element={<PricingPage />} />
           <Route path="/profile" element={<ProfilePage />} />
           <Route path="/news" element={<NewsPage />} />

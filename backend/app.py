@@ -11,6 +11,7 @@
 from fastapi import FastAPI, HTTPException, Depends, Request, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, EmailStr, validator
 from jose import JWTError, jwt
 from passlib.context import CryptContext
@@ -24,6 +25,7 @@ import re
 from typing import Optional
 from user_agents import parse as parse_user_agent
 import httpx
+import json
 import logging
 from dotenv import load_dotenv
 from schemas import VideoGenerationRequest, TaskResponse
@@ -86,12 +88,19 @@ SORA_API_KEY = os.getenv("SORA_API_KEY", "sk-a4f3a6be3c7a4c6d95633f4092586b59")
 SORA_BASE_URL = os.getenv("SORA_BASE_URL", "https://api.grsai.com/v1")
 
 # Sora 文生视频（text-to-video）服务端 Key（后端代理使用，不在前端暴露）
-SORA_TEXT_API_KEY = os.getenv("SORA_TEXT_API_KEY", "sk-pKzjE8Mz3UNxSWBd39s8DvXVNCf1g6v4CNbmhzb0Vv0koFVl")
+SORA_TEXT_API_KEY = os.getenv("SORA_TEXT_API_KEY", "")
 SORA_TEXT_BASE_URL = os.getenv("SORA_TEXT_BASE_URL", "https://api.xgai.site/v2")
 
-# === Nano Banana API Configuration ===
-NANO_API_KEY = "sk-pKzjE8Mz3UNxSWBd39s8DvXVNCf1g6v4CNbmhzb0Vv0koFVl"
-NANO_BASE_URL = "https://api.xgai.site/v1"
+# === XGAI / Nano Banana / MJ / Gemini Proxy Configuration ===
+XGAI_BASE_URL = os.getenv("XGAI_BASE_URL", "https://api.xgai.site")
+
+NANO_API_KEY = os.getenv("XGAI_NANO_API_KEY", "")
+NANO_BASE_URL = os.getenv("XGAI_NANO_BASE_URL", f"{XGAI_BASE_URL}/v1")
+
+MJ_API_KEY = os.getenv("XGAI_MJ_API_KEY", "")
+
+GEMINI_API_KEY = os.getenv("XGAI_GEMINI_API_KEY", "")
+GEMINI_MODEL = os.getenv("XGAI_GEMINI_MODEL", "gemini-3-pro-preview-thinking-*")
 
 # === 初始化 FastAPI ===
 app = FastAPI(title="安全认证系统", version="2.0.0")
@@ -205,6 +214,16 @@ class NanoGenerateRequest(BaseModel):
     aspect_ratio: Optional[str] = "16:9"
     image_size: Optional[str] = "1K"
     images: Optional[list[str]] = None
+
+
+class GeminiAnalyzeRequest(BaseModel):
+    text: str
+
+
+class MjSubmitImagineRequest(BaseModel):
+    prompt: str
+    botType: str = "MID_JOURNEY"
+    base64Array: Optional[list[str]] = None
 
 # ============================================
 # 数据库工具函数
@@ -1424,6 +1443,8 @@ async def sora_text_result(task_id: str, user = Depends(get_current_user)):
 @app.post("/api/proxy/nano/generate")
 async def nano_generate(req: NanoGenerateRequest, user = Depends(get_current_user)):
     """Nano Banana 图片生成代理接口"""
+    if not NANO_API_KEY:
+        raise HTTPException(status_code=500, detail="NanoBanana API Key 未配置")
     url = f"{NANO_BASE_URL}/images/generations"
     headers = {
         "Content-Type": "application/json",
@@ -1497,6 +1518,157 @@ async def nano_generate(req: NanoGenerateRequest, user = Depends(get_current_use
         except httpx.RequestError as e:
             logger.error(f"Nano Request Error: {e}")
             raise HTTPException(status_code=500, detail="Nano API 请求异常")
+
+
+# === MJ Proxy APIs ===
+
+@app.post("/api/proxy/mj/submit/imagine")
+async def mj_submit_imagine(req: MjSubmitImagineRequest, user=Depends(get_current_user)):
+    if not MJ_API_KEY:
+        raise HTTPException(status_code=500, detail="MJ API Key 未配置")
+
+    url = f"{XGAI_BASE_URL}/mj/submit/imagine"
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {MJ_API_KEY}",
+    }
+    payload = {
+        "prompt": req.prompt,
+        "botType": req.botType,
+        "base64Array": req.base64Array or [],
+    }
+
+    async with httpx.AsyncClient() as client:
+        try:
+            resp = await client.post(url, json=payload, headers=headers, timeout=60.0)
+            if resp.status_code != 200:
+                logger.error(f"MJ Submit Error: {resp.text}")
+                raise HTTPException(status_code=resp.status_code, detail="MJ 提交失败")
+
+            data = resp.json()
+            task_id = data.get("result")
+            if not task_id:
+                raise HTTPException(status_code=500, detail="MJ 返回缺少任务ID")
+            return {"task_id": str(task_id)}
+        except httpx.RequestError as e:
+            logger.error(f"MJ Submit Request Error: {e}")
+            raise HTTPException(status_code=500, detail="MJ 提交请求异常")
+
+
+@app.get("/api/proxy/mj/task/{task_id}/fetch")
+async def mj_task_fetch(task_id: str, user=Depends(get_current_user)):
+    if not MJ_API_KEY:
+        raise HTTPException(status_code=500, detail="MJ API Key 未配置")
+
+    url = f"{XGAI_BASE_URL}/mj/task/{task_id}/fetch"
+    headers = {
+        "Authorization": f"Bearer {MJ_API_KEY}",
+    }
+
+    async with httpx.AsyncClient() as client:
+        try:
+            resp = await client.get(url, headers=headers, timeout=60.0)
+            if resp.status_code != 200:
+                logger.error(f"MJ Fetch Error: {resp.text}")
+                raise HTTPException(status_code=resp.status_code, detail="MJ 查询失败")
+            return resp.json()
+        except httpx.RequestError as e:
+            logger.error(f"MJ Fetch Request Error: {e}")
+            raise HTTPException(status_code=500, detail="MJ 查询请求异常")
+
+
+# === Gemini Proxy APIs (stream -> text/plain) ===
+
+def _iter_gemini_delta_text(raw_chunk: str):
+    """Parse one SSE/data line or JSON chunk and yield delta.content text pieces."""
+    line = raw_chunk.strip()
+    if not line:
+        return
+
+    # SSE style: data: {...}
+    if line.startswith("data:"):
+        line = line[len("data:"):].strip()
+    if line == "[DONE]":
+        return
+
+    try:
+        obj = json.loads(line)
+    except Exception:
+        return
+
+    choices = obj.get("choices")
+    if not isinstance(choices, list) or not choices:
+        return
+    delta = choices[0].get("delta") if isinstance(choices[0], dict) else None
+    if not isinstance(delta, dict):
+        return
+    content = delta.get("content")
+    if isinstance(content, str) and content:
+        yield content
+
+
+@app.post("/api/proxy/gemini/analyze")
+async def gemini_analyze(req: GeminiAnalyzeRequest, user=Depends(get_current_user)):
+    if not GEMINI_API_KEY:
+        raise HTTPException(status_code=500, detail="Gemini API Key 未配置")
+
+    url = f"{XGAI_BASE_URL}/v1/chat/completions"
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {GEMINI_API_KEY}",
+    }
+    payload = {
+        "model": GEMINI_MODEL,
+        "stream": True,
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": (
+                            "将'" + req.text + "'转化为以Environment、Style、Subject形式的结构化的绘图语言，"
+                            "要求回答简洁干练直接输出结构化的绘图语言，例如'/主体 (Subject): ...环境 (Environment): ...艺术风格 (Style): .../'"
+                        ),
+                    }
+                ],
+            }
+        ],
+        "max_tokens": 4000,
+    }
+
+    async def streamer():
+        async with httpx.AsyncClient(timeout=None) as client:
+            async with client.stream("POST", url, json=payload, headers=headers) as resp:
+                if resp.status_code != 200:
+                    body = await resp.aread()
+                    logger.error(f"Gemini Error: {body[:2000]!r}")
+                    raise HTTPException(status_code=resp.status_code, detail="Gemini 调用失败")
+
+                buffer = ""
+                async for chunk in resp.aiter_text():
+                    if not chunk:
+                        continue
+                    buffer += chunk
+
+                    # Try splitting on SSE event separators or newlines
+                    parts = []
+                    if "\n\n" in buffer:
+                        parts = buffer.split("\n\n")
+                        buffer = parts.pop()  # keep tail
+                    elif "\n" in buffer:
+                        parts = buffer.split("\n")
+                        buffer = parts.pop()
+
+                    for p in parts:
+                        for t in _iter_gemini_delta_text(p):
+                            yield t
+
+                # flush tail
+                for t in _iter_gemini_delta_text(buffer):
+                    yield t
+
+    return StreamingResponse(streamer(), media_type="text/plain; charset=utf-8")
 
 # === 启动事件 ===
 @app.on_event("startup")

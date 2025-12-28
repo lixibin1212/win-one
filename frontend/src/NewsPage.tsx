@@ -4,6 +4,7 @@ import {
   Box,
   Button,
   Typography,
+  Paper,
   AppBar,
   Toolbar,
   IconButton,
@@ -18,6 +19,8 @@ import LogoutIcon from '@mui/icons-material/Logout';
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
 import { useAuth } from './AuthContext';
 import LogoCarousel from './LogoCarousel';
+import { AiAnimationSubNav, AiAnimationSubSection } from './aiAnimation/AiAnimationSubNav';
+import { RoleImageGeneratorPanel } from './aiAnimation/RoleImageGeneratorPanel';
 
 const waveMove = keyframes`
   0% { background-position: 0% 50%; }
@@ -34,6 +37,7 @@ const NewsPage: React.FC = () => {
   const location = useLocation();
   const { user, logout, loading } = useAuth();
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
+  const [sub, setSub] = useState<AiAnimationSubSection>('role');
 
   const handleMenu = (event: React.MouseEvent<HTMLElement>) => {
     setAnchorEl(event.currentTarget);
@@ -259,7 +263,52 @@ const NewsPage: React.FC = () => {
           minHeight: 'calc(100vh - 64px)', // Subtract AppBar height
         }}
       >
-        <LogoCarousel />
+        {/* 保持 LogoCarousel 全宽，以保留两侧的背景/渐隐效果 */}
+        <Box sx={{ width: '100%' }}>
+          <LogoCarousel
+            activeIndex={0}
+            navigateOnSelect={false}
+            persistKey="main"
+            onSelect={(index) => {
+              if (index === 1) navigate('/ai-video-edit');
+            }}
+          />
+        </Box>
+
+        {/* 图二红色区域：承载图一页面内容（走居中容器） */}
+        <Box
+          sx={{
+            width: { xs: '95%', sm: '92%', md: '90%', lg: '88%', xl: '85%' },
+            maxWidth: '1920px',
+            mx: 'auto',
+            px: { xs: 1, sm: 2, md: 3 },
+          }}
+        >
+          <Box sx={{ mt: 10, mb: 3, width: '100%' }}>
+            <AiAnimationSubNav value={sub} onChange={setSub} />
+          </Box>
+
+          {sub === 'role' ? (
+            <Box sx={{ mb: 3 }}>
+              <RoleImageGeneratorPanel />
+            </Box>
+          ) : (
+            <Paper
+              elevation={0}
+              sx={{
+                p: 6,
+                bgcolor: 'rgba(255, 255, 255, 0.75)',
+                backdropFilter: 'blur(20px) saturate(180%)',
+                border: '1px solid rgba(255, 255, 255, 0.6)',
+                borderRadius: '16px',
+                textAlign: 'center',
+              }}
+            >
+              <Typography sx={{ fontWeight: 900, color: '#0f172a', mb: 1 }}>敬请期待</Typography>
+              <Typography color="text.secondary">该功能稍后开放</Typography>
+            </Paper>
+          )}
+        </Box>
       </Box>
     </Box>
   );

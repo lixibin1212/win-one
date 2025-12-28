@@ -48,6 +48,7 @@
   align-items: center;
   gap: 12px; /* Space between icon and text */
   flex-shrink: 0;
+  cursor: pointer;
 }
 
 .logo-icon {
@@ -58,11 +59,6 @@
 }
 
 .logo-item.active .logo-icon {
-  opacity: 1;
-  transform: scale(1.1);
-}
-
-.logo-item:hover .logo-icon {
   opacity: 1;
   transform: scale(1.1);
 }

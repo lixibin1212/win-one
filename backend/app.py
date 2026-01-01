@@ -22,6 +22,7 @@ import aiohttp
 import os
 import secrets
 import re
+import asyncio
 from typing import Optional
 from user_agents import parse as parse_user_agent
 import httpx
@@ -216,7 +217,24 @@ class NanoGenerateRequest(BaseModel):
     images: Optional[list[str]] = None
 
 
+class NanoTaskCreateResponse(BaseModel):
+    task_id: str
+
+
+class NanoTaskStatusResponse(BaseModel):
+    task_id: str
+    status: str
+    images: list[str] = []
+    model: Optional[str] = None
+    prompt: Optional[str] = None
+    aspect_ratio: Optional[str] = None
+
+
 class GeminiAnalyzeRequest(BaseModel):
+    text: str
+
+
+class XgaiScriptAnalyzeRequest(BaseModel):
     text: str
 
 
@@ -481,7 +499,8 @@ async def verify_hcaptcha(token: str, remote_ip: str) -> bool:
     
     logger.info(f"🔐 正在验证 hCaptcha token...")
     
-    async with httpx.AsyncClient() as client:
+    # NOTE: trust_env=False 避免受系统 HTTP(S)_PROXY 环境变量影响，导致“Postman能通但代码连不上”。
+    async with httpx.AsyncClient(trust_env=False) as client:
         try:
             response = await client.post(
                 HCAPTCHA_VERIFY_URL,
@@ -1440,6 +1459,142 @@ async def sora_text_result(task_id: str, user = Depends(get_current_user)):
 
 # === Nano Banana Proxy APIs ===
 
+async def _run_nano_task(task_id: str, payload: dict):
+    """Background runner for NanoBanana generation.
+
+    Writes status/images into `generations` table so frontend can poll and recover after navigation.
+    """
+    url = f"{NANO_BASE_URL}/images/generations"
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {NANO_API_KEY}",
+    }
+
+    status = "failed"
+    image_urls: list[str] = []
+
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(url, json=payload, headers=headers, timeout=120.0)
+            if resp.status_code != 200:
+                logger.error(f"Nano Task Error: {resp.text}")
+                raise Exception("Nano API 调用失败")
+
+            data = resp.json()
+            if isinstance(data, dict) and isinstance(data.get("data"), list):
+                for it in data["data"]:
+                    u = it.get("url") if isinstance(it, dict) else None
+                    if u:
+                        image_urls.append(u)
+            elif isinstance(data, dict) and data.get("url"):
+                image_urls.append(str(data.get("url")))
+
+            if image_urls:
+                status = "succeeded"
+    except Exception as e:
+        logger.warning(f"Nano task {task_id} failed: {e}")
+        status = "failed"
+    finally:
+        try:
+            with engine.connect() as conn:
+                conn.execute(
+                    text(
+                        """
+                        UPDATE generations
+                        SET status = :status,
+                            images = :images,
+                            completed_at = NOW()
+                        WHERE task_id = :task_id
+                        """
+                    ),
+                    {"status": status, "images": image_urls, "task_id": task_id},
+                )
+                conn.commit()
+        except Exception as e:
+            logger.warning(f"Update generations (nano task) failed: {e}")
+
+
+@app.post("/api/proxy/nano/generate_task", response_model=NanoTaskCreateResponse)
+async def nano_generate_task(req: NanoGenerateRequest, user=Depends(get_current_user)):
+    """Create an async NanoBanana generation task and return task_id immediately."""
+    if not NANO_API_KEY:
+        raise HTTPException(status_code=500, detail="NanoBanana API Key 未配置")
+
+    import uuid
+
+    task_id = f"nano-{uuid.uuid4().hex}"
+    payload = {
+        "model": req.model,
+        "prompt": req.prompt,
+        "aspect_ratio": req.aspect_ratio,
+        "response_format": "url",
+    }
+    if req.model == "nano-banana-2" and req.image_size:
+        payload["image_size"] = req.image_size
+    if req.images:
+        payload["image"] = req.images
+
+    # Insert pending/running record first so polling works immediately
+    try:
+        with engine.connect() as conn:
+            conn.execute(
+                text(
+                    """
+                    INSERT INTO generations (task_id, model, prompt, images, aspect_ratio, status, created_at)
+                    VALUES (:task_id, :model, :prompt, :images, :aspect_ratio, :status, NOW())
+                    """
+                ),
+                {
+                    "task_id": task_id,
+                    "model": req.model,
+                    "prompt": req.prompt,
+                    "images": [],
+                    "aspect_ratio": req.aspect_ratio or "16:9",
+                    "status": "running",
+                },
+            )
+            conn.commit()
+    except Exception as e:
+        logger.warning(f"Insert generations (nano task) failed: {e}")
+
+    # Fire-and-forget background task
+    asyncio.create_task(_run_nano_task(task_id, payload))
+    return {"task_id": task_id}
+
+
+@app.get("/api/proxy/nano/task/{task_id}", response_model=NanoTaskStatusResponse)
+async def nano_task_status(task_id: str, user=Depends(get_current_user)):
+    """Poll a NanoBanana task result from `generations` table."""
+    try:
+        with engine.connect() as conn:
+            result = conn.execute(
+                text(
+                    """
+                    SELECT task_id, status, images, model, prompt, aspect_ratio
+                    FROM generations
+                    WHERE task_id = :task_id
+                    """
+                ),
+                {"task_id": task_id},
+            )
+            row = result.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="任务不存在")
+            d = dict(row._mapping)
+            return {
+                "task_id": d.get("task_id"),
+                "status": d.get("status"),
+                "images": d.get("images") or [],
+                "model": d.get("model"),
+                "prompt": d.get("prompt"),
+                "aspect_ratio": d.get("aspect_ratio"),
+            }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"nano_task_status error: {e}")
+        raise HTTPException(status_code=500, detail="任务查询失败")
+
 @app.post("/api/proxy/nano/generate")
 async def nano_generate(req: NanoGenerateRequest, user = Depends(get_current_user)):
     """Nano Banana 图片生成代理接口"""
@@ -1516,8 +1671,11 @@ async def nano_generate(req: NanoGenerateRequest, user = Depends(get_current_use
                 logger.warning(f"Insert generations (nano) failed: {e}")
             return data
         except httpx.RequestError as e:
-            logger.error(f"Nano Request Error: {e}")
-            raise HTTPException(status_code=500, detail="Nano API 请求异常")
+            logger.error(f"Nano Request Error ({url}): {repr(e)}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Nano API 请求异常（{url}）：{type(e).__name__}: {e}",
+            )
 
 
 # === MJ Proxy APIs ===
@@ -1605,6 +1763,79 @@ def _iter_gemini_delta_text(raw_chunk: str):
     content = delta.get("content")
     if isinstance(content, str) and content:
         yield content
+
+
+@app.post("/api/proxy/xgai/script-analyze")
+async def xgai_script_analyze(req: XgaiScriptAnalyzeRequest, user=Depends(get_current_user)):
+    api_key = os.getenv("XGAI_SCRIPT_API_KEY") or GEMINI_API_KEY
+    model = os.getenv("XGAI_SCRIPT_MODEL", "gemini-3-pro-preview-thinking-*")
+    if not api_key:
+        raise HTTPException(status_code=500, detail="XGAI Script API Key 未配置")
+
+    url = f"{XGAI_BASE_URL}/v1/chat/completions"
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {api_key}",
+    }
+
+    user_text = (req.text or "").strip()
+    prompt_text = (
+        "请分析以下推文内容，提炼核心叙事节点、关键角色与视觉重点，生成适配nanobanana九宫格（3×3）的分镜脚本（仅含九宫格生图所需信息，不含音频参数）。"
+        "要求：1. 分镜数量为9个，按“开场→背景铺垫→冲突升级→转折→高潮→收尾悬念”逻辑排序；"
+        "2. 每个分镜按“镜头X（景别）：核心动作+叙事功能+对应角色”的格式单独列出，无需表格；"
+        "3. 补充分镜核心视觉信息（场景、光影、关键特效），确保可独立生成清晰画面；"
+        "4. 标注收尾镜头（第9镜）的画面锚点（用于上下集衔接）；"
+        "5. 舍弃次要情节，保留最具视觉冲击力的内容。"
+        f"推文内容：{user_text}"
+    )
+
+    payload = {
+        "model": model,
+        "stream": True,
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": prompt_text,
+                    }
+                ],
+            }
+        ],
+        "max_tokens": 4000,
+    }
+
+    async def streamer():
+        async with httpx.AsyncClient(timeout=None) as client:
+            async with client.stream("POST", url, json=payload, headers=headers) as resp:
+                if resp.status_code != 200:
+                    body = await resp.aread()
+                    logger.error(f"XGAI Script Error: {body[:2000]!r}")
+                    raise HTTPException(status_code=resp.status_code, detail="脚本分析调用失败")
+
+                buffer = ""
+                async for chunk in resp.aiter_text():
+                    if not chunk:
+                        continue
+                    buffer += chunk
+
+                    parts = []
+                    if "\n\n" in buffer:
+                        parts = buffer.split("\n\n")
+                        buffer = parts.pop()
+                    elif "\n" in buffer:
+                        parts = buffer.split("\n")
+                        buffer = parts.pop()
+
+                    for p in parts:
+                        for t in _iter_gemini_delta_text(p):
+                            yield t
+
+                for t in _iter_gemini_delta_text(buffer):
+                    yield t
+
+    return StreamingResponse(streamer(), media_type="text/plain; charset=utf-8")
 
 
 @app.post("/api/proxy/gemini/analyze")

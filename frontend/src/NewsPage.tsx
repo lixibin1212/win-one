@@ -5,6 +5,7 @@ import {
   Button,
   Typography,
   Paper,
+  Tooltip,
   AppBar,
   Toolbar,
   IconButton,
@@ -21,6 +22,7 @@ import { useAuth } from './AuthContext';
 import LogoCarousel from './LogoCarousel';
 import { AiAnimationSubNav, AiAnimationSubSection } from './aiAnimation/AiAnimationSubNav';
 import { RoleImageGeneratorPanel } from './aiAnimation/RoleImageGeneratorPanel';
+import { ScriptAnalysisPanel } from './aiAnimation/ScriptAnalysisPanel';
 
 const waveMove = keyframes`
   0% { background-position: 0% 50%; }
@@ -38,6 +40,15 @@ const NewsPage: React.FC = () => {
   const { user, logout, loading } = useAuth();
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
   const [sub, setSub] = useState<AiAnimationSubSection>('role');
+  const [scriptInstance, setScriptInstance] = useState(0);
+  const [animationRows, setAnimationRows] = useState(2);
+
+  const handleSubChange = (next: AiAnimationSubSection) => {
+    if (sub === 'script' && next !== 'script') {
+      setScriptInstance((v) => v + 1);
+    }
+    setSub(next);
+  };
 
   const handleMenu = (event: React.MouseEvent<HTMLElement>) => {
     setAnchorEl(event.currentTarget);
@@ -278,35 +289,132 @@ const NewsPage: React.FC = () => {
         {/* 图二红色区域：承载图一页面内容（走居中容器） */}
         <Box
           sx={{
-            width: { xs: '95%', sm: '92%', md: '90%', lg: '88%', xl: '85%' },
+            width: { xs: '98%', sm: '96%', md: '94%', lg: '92%', xl: '90%' },
             maxWidth: '1920px',
             mx: 'auto',
-            px: { xs: 1, sm: 2, md: 3 },
+            px: { xs: 0.5, sm: 1, md: 2 },
           }}
         >
           <Box sx={{ mt: 10, mb: 3, width: '100%' }}>
-            <AiAnimationSubNav value={sub} onChange={setSub} />
+            <AiAnimationSubNav value={sub} onChange={handleSubChange} />
           </Box>
 
           {sub === 'role' ? (
             <Box sx={{ mb: 3 }}>
               <RoleImageGeneratorPanel />
             </Box>
+          ) : sub === 'script' ? (
+            <Box sx={{ mb: 3 }}>
+              <ScriptAnalysisPanel key={`script-${scriptInstance}`} />
+            </Box>
           ) : (
-            <Paper
-              elevation={0}
-              sx={{
-                p: 6,
-                bgcolor: 'rgba(255, 255, 255, 0.75)',
-                backdropFilter: 'blur(20px) saturate(180%)',
-                border: '1px solid rgba(255, 255, 255, 0.6)',
-                borderRadius: '16px',
-                textAlign: 'center',
-              }}
-            >
-              <Typography sx={{ fontWeight: 900, color: '#0f172a', mb: 1 }}>敬请期待</Typography>
-              <Typography color="text.secondary">该功能稍后开放</Typography>
-            </Paper>
+            <Box>
+              <Paper
+                elevation={0}
+                sx={{
+                  p: 0,
+                  bgcolor: 'rgba(255, 255, 255, 0.75)',
+                  backdropFilter: 'blur(20px) saturate(180%)',
+                  border: '1px solid rgba(255, 255, 255, 0.6)',
+                  borderRadius: '16px',
+                  overflow: 'hidden',
+                  width: '100%',
+                  minHeight: { xs: 220, md: 260 },
+                }}
+              >
+                {(() => {
+                    const headers = ['分镜脚本', '角色', '操作', '九宫格图像', '视频脚本', '生成视频', '操作'];
+                  const borderColor = 'rgba(15, 23, 42, 0.18)';
+                  const border = `2px solid ${borderColor}`;
+                    const gridCols = '1.05fr 1.55fr 0.55fr 1.05fr 1.05fr 1.25fr 0.55fr';
+                  const rowHeight = { xs: 150, md: 190 };
+                  return (
+                    <Box
+                      sx={{
+                        width: '100%',
+                        borderLeft: border,
+                        borderRight: border,
+                        borderTop: border,
+                        borderBottom: border,
+                        boxSizing: 'border-box',
+                      }}
+                    >
+                      <Box sx={{ display: 'grid', gridTemplateColumns: gridCols, width: '100%' }}>
+                        {headers.map((t, idx) => (
+                          <Box
+                            key={t}
+                            sx={{
+                              textAlign: 'center',
+                              fontWeight: 900,
+                              color: '#0f172a',
+                              py: 2,
+                              borderBottom: border,
+                              borderRight: idx === headers.length - 1 ? 'none' : border,
+                            }}
+                          >
+                            {t}
+                          </Box>
+                        ))}
+                      </Box>
+
+                      <Box sx={{ width: '100%' }}>
+                        {Array.from({ length: animationRows }).map((_, rowIdx) => (
+                          <Box
+                            key={rowIdx}
+                            sx={{
+                              display: 'grid',
+                              gridTemplateColumns: gridCols,
+                              width: '100%',
+                              height: rowHeight,
+                              bgcolor: 'rgba(255, 255, 255, 0.35)',
+                              borderBottom: rowIdx === animationRows - 1 ? 'none' : border,
+                            }}
+                          >
+                            {headers.map((__, colIdx) => (
+                              <Box
+                                key={colIdx}
+                                sx={{
+                                  borderRight: colIdx === headers.length - 1 ? 'none' : border,
+                                  height: '100%',
+                                }}
+                              />
+                            ))}
+                          </Box>
+                        ))}
+                      </Box>
+                    </Box>
+                  );
+                })()}
+              </Paper>
+
+              {/* 容器外边底部的按钮：只保留图标（无白色方块底） */}
+              <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 1 }}>
+                <Tooltip title="增加视频栏" placement="top">
+                  <Box
+                    role="button"
+                    aria-label="增加视频栏"
+                    onClick={() => setAnimationRows((v) => v + 1)}
+                    sx={{
+                      width: 22,
+                      height: 22,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      cursor: 'pointer',
+                      userSelect: 'none',
+                      '&:hover img': { opacity: 0.85 },
+                    }}
+                  >
+                    <Box
+                      component="img"
+                      src={`${process.env.PUBLIC_URL || ''}/add.svg`}
+                      alt="add"
+                      sx={{ width: 18, height: 18, display: 'block' }}
+                    />
+                  </Box>
+                </Tooltip>
+              </Box>
+            </Box>
           )}
         </Box>
       </Box>

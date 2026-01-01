@@ -18,8 +18,12 @@ import {
 const API_BASE = process.env.REACT_APP_API_BASE || 'http://localhost:8000';
 
 const RESULT_HISTORY_STORAGE_KEY = 'x-role-image-result-history-v1';
+const NANO_RUNNING_TASK_STORAGE_KEY = 'x-nano-running-task-v1';
+const MJ_RUNNING_TASK_STORAGE_KEY = 'x-mj-running-task-v1';
 
 type EngineType = 'banana' | 'mj';
+
+type AspectRatio = '9:16' | '16:9' | '1:1' | '4:3' | '3:4';
 
 type ResultItem = {
   id: string;
@@ -31,6 +35,16 @@ type ResultItem = {
 type BananaResponse = {
   data?: Array<{ url?: string }>;
   task_id?: string;
+};
+
+type NanoTaskCreateResponse = {
+  task_id: string;
+};
+
+type NanoTaskStatusResponse = {
+  task_id: string;
+  status: string;
+  images?: string[];
 };
 
 type MjSubmitResponse = {
@@ -64,6 +78,8 @@ export const RoleImageGeneratorPanel: React.FC = () => {
   const [engine, setEngine] = useState<EngineType>('banana');
   const [prompt, setPrompt] = useState('');
 
+  const [aspectRatio, setAspectRatio] = useState<AspectRatio>('9:16');
+
   const [refImages, setRefImages] = useState<Array<{ name: string; dataUrl: string; base64: string }>>([]);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -72,6 +88,7 @@ export const RoleImageGeneratorPanel: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
 
   const [bananaUrls, setBananaUrls] = useState<string[]>([]);
+  const [bananaTaskId, setBananaTaskId] = useState<string | null>(null);
   const [mjTaskId, setMjTaskId] = useState<string | null>(null);
   const [mjStatus, setMjStatus] = useState<string>('');
   const [mjProgress, setMjProgress] = useState<string>('');
@@ -96,6 +113,7 @@ export const RoleImageGeneratorPanel: React.FC = () => {
 
   const resetRunState = () => {
     setBananaUrls([]);
+    setBananaTaskId(null);
     setMjTaskId(null);
     setMjStatus('');
     setMjProgress('');
@@ -300,9 +318,116 @@ export const RoleImageGeneratorPanel: React.FC = () => {
     throw new Error('MJ 生成超时');
   };
 
+  const pollNanoTask = async (taskId: string): Promise<string[]> => {
+    const startAt = Date.now();
+    const timeoutMs = 180_000;
+
+    while (Date.now() - startAt < timeoutMs) {
+      const res = await fetch(`${API_BASE}/api/proxy/nano/task/${encodeURIComponent(taskId)}`, {
+        headers: buildHeaders(false),
+      });
+
+      if (!res.ok) {
+        const msg = await res.text().catch(() => '');
+        throw new Error(msg || 'NanoBanana 查询失败');
+      }
+
+      const data = (await res.json()) as NanoTaskStatusResponse;
+      const status = String(data.status || '').toLowerCase();
+      if (status === 'succeeded' || status === 'success') {
+        const urls = (data.images || []).filter(Boolean);
+        setBananaUrls(urls);
+        return urls;
+      }
+      if (status === 'failed' || status === 'fail' || status === 'failure') {
+        throw new Error('NanoBanana 生成失败');
+      }
+
+      await new Promise((r) => setTimeout(r, 1500));
+    }
+
+    throw new Error('NanoBanana 生成超时');
+  };
+
+  useEffect(() => {
+    // Resume running task after navigation/re-mount (Nano or MJ)
+    try {
+      const rawNano = localStorage.getItem(NANO_RUNNING_TASK_STORAGE_KEY);
+      const rawMj = localStorage.getItem(MJ_RUNNING_TASK_STORAGE_KEY);
+      if (!rawNano && !rawMj) return;
+
+      const parseTask = (raw: string | null) => {
+        if (!raw) return { taskId: '', createdAt: 0 };
+        try {
+          const parsed = JSON.parse(raw) as { taskId?: string; createdAt?: number };
+          return {
+            taskId: String(parsed?.taskId || '').trim(),
+            createdAt: Number(parsed?.createdAt || 0) || 0,
+          };
+        } catch {
+          return { taskId: '', createdAt: 0 };
+        }
+      };
+
+      const nano = parseTask(rawNano);
+      const mj = parseTask(rawMj);
+
+      // Prefer the newer one if both exist
+      const shouldUseNano = nano.taskId && (!mj.taskId || nano.createdAt >= mj.createdAt);
+      const chosen = shouldUseNano ? { kind: 'nano' as const, ...nano } : { kind: 'mj' as const, ...mj };
+      if (!chosen.taskId) return;
+
+      setError(null);
+      setIsGenerating(true);
+
+      if (chosen.kind === 'nano') {
+        setEngine('banana');
+        setBananaTaskId(chosen.taskId);
+        (async () => {
+          try {
+            const urls = await pollNanoTask(chosen.taskId);
+            if (urls.length === 0) throw new Error('NanoBanana 未返回图片');
+            addResultToHistory('banana', urls);
+          } catch (e: any) {
+            setError(e?.message || 'NanoBanana 生成失败');
+          } finally {
+            localStorage.removeItem(NANO_RUNNING_TASK_STORAGE_KEY);
+            setIsGenerating(false);
+          }
+        })();
+      } else {
+        setEngine('mj');
+        setMjTaskId(chosen.taskId);
+        setMjStatus('SUBMITTED');
+        (async () => {
+          try {
+            const urls = await pollMj(chosen.taskId);
+            if (urls.length > 0) addResultToHistory('mj', urls);
+          } catch (e: any) {
+            setError(e?.message || 'MJ 生成失败');
+          } finally {
+            localStorage.removeItem(MJ_RUNNING_TASK_STORAGE_KEY);
+            setIsGenerating(false);
+          }
+        })();
+      }
+    } catch {
+      // ignore
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const handleGenerate = async () => {
     setError(null);
     resetRunState();
+
+    // Starting a new run cancels any resumable task state
+    try {
+      localStorage.removeItem(NANO_RUNNING_TASK_STORAGE_KEY);
+      localStorage.removeItem(MJ_RUNNING_TASK_STORAGE_KEY);
+    } catch {
+      // ignore
+    }
 
     if (!prompt.trim()) {
       setError('请输入提示词');
@@ -313,28 +438,34 @@ export const RoleImageGeneratorPanel: React.FC = () => {
 
     try {
       if (engine === 'banana') {
-        const res = await fetch(`${API_BASE}/api/proxy/nano/generate`, {
+        const createRes = await fetch(`${API_BASE}/api/proxy/nano/generate_task`, {
           method: 'POST',
           headers: buildHeaders(true),
           body: JSON.stringify({
             model: 'nano-banana-2',
             prompt,
-            aspect_ratio: '9:16',
+            aspect_ratio: aspectRatio,
             image_size: '1K',
             images: refImages.map((x) => x.dataUrl).slice(0, 11),
           }),
         });
 
-        if (!res.ok) {
-          const msg = await res.text().catch(() => '');
-          throw new Error(msg || 'NanoBanana 生成失败');
+        if (!createRes.ok) {
+          const msg = await createRes.text().catch(() => '');
+          throw new Error(msg || 'NanoBanana 提交失败');
         }
 
-        const data = (await res.json()) as BananaResponse;
-        const urls = (data.data || []).map((x) => x.url).filter(Boolean) as string[];
-        setBananaUrls(urls);
+        const created = (await createRes.json()) as NanoTaskCreateResponse;
+        const taskId = String(created.task_id || '').trim();
+        if (!taskId) throw new Error('NanoBanana 返回缺少任务ID');
+
+        setBananaTaskId(taskId);
+        localStorage.setItem(NANO_RUNNING_TASK_STORAGE_KEY, JSON.stringify({ taskId, createdAt: Date.now() }));
+
+        const urls = await pollNanoTask(taskId);
         if (urls.length === 0) throw new Error('NanoBanana 未返回图片');
         addResultToHistory('banana', urls);
+        localStorage.removeItem(NANO_RUNNING_TASK_STORAGE_KEY);
         return;
       }
 
@@ -358,8 +489,20 @@ export const RoleImageGeneratorPanel: React.FC = () => {
       setMjTaskId(submitData.task_id);
       setMjStatus('SUBMITTED');
 
+      try {
+        localStorage.setItem(MJ_RUNNING_TASK_STORAGE_KEY, JSON.stringify({ taskId: submitData.task_id, createdAt: Date.now() }));
+      } catch {
+        // ignore
+      }
+
       const urls = await pollMj(submitData.task_id);
       if (urls.length > 0) addResultToHistory('mj', urls);
+
+      try {
+        localStorage.removeItem(MJ_RUNNING_TASK_STORAGE_KEY);
+      } catch {
+        // ignore
+      }
     } catch (e: any) {
       setError(e?.message || '生成失败');
     } finally {
@@ -368,8 +511,12 @@ export const RoleImageGeneratorPanel: React.FC = () => {
   };
 
   const rightContent = () => {
-    const mediaMaxHeight = { xs: 260, md: 460 } as const;
-    const singleCardWidth = { xs: '92%', md: 380 } as const;
+    const mediaMaxHeight = {
+      xs: 'calc(100vh - 520px)',
+      md: 'calc(100vh - 260px)',
+    } as const;
+    const singleCardWidth = { xs: '96%', md: 520 } as const;
+    const loadingCardWidth = { xs: '88%', md: 360 } as const;
     return (
       <Box
         ref={resultsScrollRef}
@@ -403,6 +550,8 @@ export const RoleImageGeneratorPanel: React.FC = () => {
                 sx={{
                   width: isBanana ? singleCardWidth : undefined,
                   maxWidth: '92%',
+                  display: 'flex',
+                  justifyContent: 'center',
                   '& .result-close': { opacity: 0, transition: 'opacity 120ms ease' },
                   '&:hover .result-close': { opacity: 1 },
                   '&:focus-within .result-close': { opacity: 1 },
@@ -580,7 +729,7 @@ export const RoleImageGeneratorPanel: React.FC = () => {
             ) : (
               <Box
                 sx={{
-                  width: singleCardWidth,
+                  width: loadingCardWidth,
                   maxWidth: '92%',
                   ...placeholderCardSx,
                   height: mediaMaxHeight,
@@ -671,6 +820,44 @@ export const RoleImageGeneratorPanel: React.FC = () => {
             {isAnalyzing ? '结构化中...' : '提示词结构化'}
           </Button>
         </Box>
+
+        <FormControl fullWidth size="small" sx={{ mb: 2 }} disabled={engine !== 'banana'}>
+          <InputLabel id="aspect-ratio-label" sx={{ fontSize: 11 }}>
+            画幅比例
+          </InputLabel>
+          <Select
+            labelId="aspect-ratio-label"
+            label="画幅比例"
+            value={aspectRatio}
+            sx={{ '& .MuiSelect-select': { fontSize: 13 } }}
+            MenuProps={{
+              PaperProps: {
+                sx: {
+                  '& .MuiMenuItem-root': { fontSize: 13 },
+                },
+              },
+            }}
+            onChange={(e) => {
+              setAspectRatio(e.target.value as AspectRatio);
+            }}
+          >
+            <MenuItem value="9:16" sx={{ fontSize: 13 }}>
+              9:16（竖屏）
+            </MenuItem>
+            <MenuItem value="16:9" sx={{ fontSize: 13 }}>
+              16:9（横屏）
+            </MenuItem>
+            <MenuItem value="1:1" sx={{ fontSize: 13 }}>
+              1:1（方形）
+            </MenuItem>
+            <MenuItem value="4:3" sx={{ fontSize: 13 }}>
+              4:3
+            </MenuItem>
+            <MenuItem value="3:4" sx={{ fontSize: 13 }}>
+              3:4
+            </MenuItem>
+          </Select>
+        </FormControl>
 
         <Box sx={{ display: 'flex', gap: 1.5, mb: 2 }}>
           <Button

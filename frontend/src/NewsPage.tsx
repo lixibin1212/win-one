@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import {
   Box,
@@ -9,6 +9,7 @@ import {
   AppBar,
   Toolbar,
   IconButton,
+  InputBase,
   Avatar,
   Menu,
   MenuItem,
@@ -41,7 +42,101 @@ const NewsPage: React.FC = () => {
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
   const [sub, setSub] = useState<AiAnimationSubSection>('role');
   const [scriptInstance, setScriptInstance] = useState(0);
-  const [animationRows, setAnimationRows] = useState(2);
+
+  type RoleCard = {
+    id: string;
+    name: string;
+    imageDataUrl: string | null;
+    voice: string;
+  };
+
+  type VideoRow = {
+    id: string;
+    roleCards: RoleCard[];
+  };
+
+  const headers = useMemo(() => ['分镜脚本', '角色', '操作', '九宫格图像', '视频脚本', '生成视频', '操作'], []);
+  const gridCols = useMemo(() => '1.05fr 1.55fr 0.55fr 1.05fr 1.05fr 1.25fr 0.55fr', []);
+  const tableLine = 'rgba(15, 23, 42, 0.18)';
+  const gridBorder = `2px solid ${tableLine}`;
+
+  const makeRow = (id: string): VideoRow => ({
+    id,
+    roleCards: [{ id: `${id}-role-1`, name: '未命名', imageDataUrl: null, voice: '' }],
+  });
+
+  const nextRowId = useRef(3);
+  const [rows, setRows] = useState<VideoRow[]>(() => [makeRow('row-1'), makeRow('row-2')]);
+
+  const updateRow = (rowId: string, updater: (row: VideoRow) => VideoRow) => {
+    setRows((prev) => prev.map((r) => (r.id === rowId ? updater(r) : r)));
+  };
+
+  const addRow = () => {
+    setRows((prev) => {
+      const id = `row-${nextRowId.current}`;
+      nextRowId.current += 1;
+      return [...prev, makeRow(id)];
+    });
+  };
+
+  const deleteRow = (rowId: string) => {
+    setRows((prev) => prev.filter((r) => r.id !== rowId));
+  };
+
+  const addRoleCard = (rowId: string) => {
+    updateRow(rowId, (row) => {
+      if (row.roleCards.length >= 11) return row;
+      const parseRoleNum = (id: string) => {
+        const m = id.match(/-role-(\d+)$/);
+        return m ? Number(m[1]) : 0;
+      };
+      const nextIdx = Math.max(0, ...row.roleCards.map((c) => parseRoleNum(c.id))) + 1;
+      return {
+        ...row,
+        roleCards: [
+          ...row.roleCards,
+          { id: `${rowId}-role-${nextIdx}`, name: '未命名', imageDataUrl: null, voice: '' },
+        ],
+      };
+    });
+  };
+
+  const deleteRoleCard = (rowId: string, roleId: string) => {
+    updateRow(rowId, (row) => {
+      if (row.roleCards.length <= 1) return row;
+      return { ...row, roleCards: row.roleCards.filter((c) => c.id !== roleId) };
+    });
+  };
+
+  const setRoleName = (rowId: string, roleId: string, name: string) => {
+    updateRow(rowId, (row) => ({
+      ...row,
+      roleCards: row.roleCards.map((c) => (c.id === roleId ? { ...c, name } : c)),
+    }));
+  };
+
+  const setRoleVoice = (rowId: string, roleId: string, voice: string) => {
+    updateRow(rowId, (row) => ({
+      ...row,
+      roleCards: row.roleCards.map((c) => (c.id === roleId ? { ...c, voice } : c)),
+    }));
+  };
+
+  const fileInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
+
+  const setRoleImage = async (rowId: string, roleId: string, file: File) => {
+    const dataUrl = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onerror = () => reject(new Error('读取图片失败'));
+      reader.onload = () => resolve(String(reader.result));
+      reader.readAsDataURL(file);
+    });
+    updateRow(rowId, (row) => ({
+      ...row,
+      roleCards: row.roleCards.map((c) => (c.id === roleId ? { ...c, imageDataUrl: dataUrl } : c)),
+    }));
+  };
 
   const handleSubChange = (next: AiAnimationSubSection) => {
     if (sub === 'script' && next !== 'script') {
@@ -322,69 +417,341 @@ const NewsPage: React.FC = () => {
                   minHeight: { xs: 220, md: 260 },
                 }}
               >
-                {(() => {
-                    const headers = ['分镜脚本', '角色', '操作', '九宫格图像', '视频脚本', '生成视频', '操作'];
-                  const borderColor = 'rgba(15, 23, 42, 0.18)';
-                  const border = `2px solid ${borderColor}`;
-                    const gridCols = '1.05fr 1.55fr 0.55fr 1.05fr 1.05fr 1.25fr 0.55fr';
-                  const rowHeight = { xs: 150, md: 190 };
-                  return (
-                    <Box
-                      sx={{
-                        width: '100%',
-                        borderLeft: border,
-                        borderRight: border,
-                        borderTop: border,
-                        borderBottom: border,
-                        boxSizing: 'border-box',
-                      }}
-                    >
-                      <Box sx={{ display: 'grid', gridTemplateColumns: gridCols, width: '100%' }}>
-                        {headers.map((t, idx) => (
-                          <Box
-                            key={t}
-                            sx={{
-                              textAlign: 'center',
-                              fontWeight: 900,
-                              color: '#0f172a',
-                              py: 2,
-                              borderBottom: border,
-                              borderRight: idx === headers.length - 1 ? 'none' : border,
-                            }}
-                          >
-                            {t}
-                          </Box>
-                        ))}
+                <Box
+                  sx={{
+                    width: '100%',
+                    borderLeft: gridBorder,
+                    borderRight: gridBorder,
+                    borderTop: gridBorder,
+                    borderBottom: gridBorder,
+                    boxSizing: 'border-box',
+                  }}
+                >
+                  {/* 表头 */}
+                  <Box sx={{ display: 'grid', gridTemplateColumns: gridCols, width: '100%' }}>
+                    {headers.map((t, idx) => (
+                      <Box
+                        key={t}
+                        sx={{
+                          textAlign: 'center',
+                          fontWeight: 900,
+                          color: '#0f172a',
+                          py: 2,
+                          borderBottom: gridBorder,
+                          borderRight: idx === headers.length - 1 ? 'none' : gridBorder,
+                          bgcolor: 'rgba(255,255,255,0.55)',
+                        }}
+                      >
+                        {t}
                       </Box>
+                    ))}
+                  </Box>
 
-                      <Box sx={{ width: '100%' }}>
-                        {Array.from({ length: animationRows }).map((_, rowIdx) => (
+                  {/* 行 */}
+                  <Box sx={{ width: '100%' }}>
+                    {rows.map((row, rowIdx) => {
+                      const canDelete = rowIdx > 0;
+                      const canAddRole = row.roleCards.length < 11;
+                      const accent = '#ef4444';
+                      const accentBorder = `2px solid ${accent}`;
+
+                      return (
+                        <Box
+                          key={row.id}
+                          sx={{
+                            display: 'grid',
+                            gridTemplateColumns: gridCols,
+                            width: '100%',
+                            minHeight: { xs: 150, md: 190 },
+                            height: 'auto',
+                            bgcolor: 'rgba(255, 255, 255, 0.35)',
+                            borderBottom: rowIdx === rows.length - 1 ? 'none' : gridBorder,
+                          }}
+                        >
+                          {/* 分镜脚本 */}
+                          <Box sx={{ borderRight: gridBorder }} />
+
+                          {/* 角色 */}
                           <Box
-                            key={rowIdx}
                             sx={{
-                              display: 'grid',
-                              gridTemplateColumns: gridCols,
-                              width: '100%',
-                              height: rowHeight,
-                              bgcolor: 'rgba(255, 255, 255, 0.35)',
-                              borderBottom: rowIdx === animationRows - 1 ? 'none' : border,
+                              borderRight: gridBorder,
+                              px: { xs: 0.9, md: 1.2 },
+                              py: { xs: 1.1, md: 1.5 },
+                              display: 'flex',
+                              flexDirection: 'column',
+                              gap: 1.2,
+                              overflow: 'hidden',
                             }}
                           >
-                            {headers.map((__, colIdx) => (
+                            <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1.4 }}>
                               <Box
-                                key={colIdx}
                                 sx={{
-                                  borderRight: colIdx === headers.length - 1 ? 'none' : border,
-                                  height: '100%',
+                                  display: 'flex',
+                                  flexDirection: 'column',
+                                  alignItems: 'flex-start',
+                                  gap: 1.2,
+                                  minHeight: 86,
+                                  flex: '1 1 auto',
+                                  minWidth: 0,
+                                  pr: 1,
                                 }}
-                              />
-                            ))}
+                              >
+                                {row.roleCards.map((card, cardIdx) => {
+                                  const inputKey = `${row.id}:${card.id}`;
+                                  const canDeleteRole = row.roleCards.length > 1;
+                                  const roleNo = cardIdx + 1;
+                                  return (
+                                    <Box key={card.id} sx={{ display: 'flex', flexDirection: 'column', gap: 1.0 }}>
+                                      <Box sx={{ display: 'flex', alignItems: 'flex-end', gap: 1.0, maxWidth: '100%' }}>
+                                        <Typography
+                                          sx={{
+                                            fontWeight: 900,
+                                            color: accent,
+                                            flex: '0 0 auto',
+                                            minWidth: 56,
+                                            whiteSpace: 'nowrap',
+                                            lineHeight: 1.1,
+                                            textAlign: 'left',
+                                            alignSelf: 'center',
+                                          }}
+                                        >
+                                          角色{roleNo}:
+                                        </Typography>
+
+                                        <Box
+                                          onClick={() => fileInputRefs.current[inputKey]?.click()}
+                                          role="button"
+                                          aria-label="上传角色图片"
+                                          sx={{
+                                            width: 56,
+                                            height: 64,
+                                            borderRadius: 1,
+                                            border: accentBorder,
+                                            bgcolor: '#fff',
+                                            cursor: 'pointer',
+                                            overflow: 'hidden',
+                                            flex: '0 0 auto',
+                                          }}
+                                        >
+                                          <input
+                                            ref={(el) => {
+                                              fileInputRefs.current[inputKey] = el;
+                                            }}
+                                            type="file"
+                                            accept="image/*"
+                                            style={{ display: 'none' }}
+                                            onChange={async (e) => {
+                                              const file = e.target.files?.[0];
+                                              if (!file) return;
+                                              await setRoleImage(row.id, card.id, file);
+                                              e.target.value = '';
+                                            }}
+                                          />
+                                          {card.imageDataUrl ? (
+                                            <Box
+                                              component="img"
+                                              src={card.imageDataUrl}
+                                              alt=""
+                                              sx={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+                                            />
+                                          ) : (
+                                            <Box sx={{ width: '100%', height: '100%' }} />
+                                          )}
+                                        </Box>
+
+                                        <Box
+                                          sx={{
+                                            width: 76,
+                                            height: 30,
+                                            borderRadius: 1,
+                                            border: accentBorder,
+                                            bgcolor: '#fff',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'center',
+                                            px: 0.5,
+                                            flex: '0 0 auto',
+                                          }}
+                                        >
+                                          <InputBase
+                                            value={card.name}
+                                            onChange={(e) => setRoleName(row.id, card.id, e.target.value)}
+                                            sx={{
+                                              fontSize: 12,
+                                              fontWeight: 800,
+                                              width: '100%',
+                                              '& input': { textAlign: 'center', p: 0 },
+                                            }}
+                                          />
+                                        </Box>
+
+                                        <IconButton
+                                          size="small"
+                                          onClick={() => deleteRoleCard(row.id, card.id)}
+                                          disabled={!canDeleteRole}
+                                          sx={{
+                                            width: 38,
+                                            height: 28,
+                                            borderRadius: 1,
+                                            border: accentBorder,
+                                            color: accent,
+                                            bgcolor: '#fff',
+                                            flex: '0 0 auto',
+                                          }}
+                                        >
+                                          <Typography sx={{ fontWeight: 900, lineHeight: 1 }}>-</Typography>
+                                        </IconButton>
+                                      </Box>
+
+                                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.0 }}>
+                                        <Typography
+                                          sx={{
+                                            fontWeight: 900,
+                                            color: accent,
+                                            flex: '0 0 auto',
+                                            minWidth: 56,
+                                            whiteSpace: 'nowrap',
+                                            lineHeight: 1.1,
+                                          }}
+                                        >
+                                          音色:
+                                        </Typography>
+                                        <Box
+                                          sx={{
+                                            height: 34,
+                                            borderRadius: 1,
+                                            border: accentBorder,
+                                            bgcolor: '#fff',
+                                            px: 1,
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            flex: '1 1 auto',
+                                            minWidth: 0,
+                                            maxWidth: 260,
+                                          }}
+                                        >
+                                          <InputBase
+                                            value={card.voice}
+                                            onChange={(e) => setRoleVoice(row.id, card.id, e.target.value)}
+                                            sx={{ width: '100%', fontSize: 13, '& input': { p: 0 } }}
+                                          />
+                                        </Box>
+                                      </Box>
+                                    </Box>
+                                  );
+                                })}
+                              </Box>
+
+                              <Box
+                                sx={{
+                                  display: 'flex',
+                                  flexDirection: 'column',
+                                  gap: 1.1,
+                                  pt: 0.2,
+                                  flex: '0 0 auto',
+                                  zIndex: 2,
+                                }}
+                              >
+                                <IconButton
+                                  size="small"
+                                  onClick={() => addRoleCard(row.id)}
+                                  disabled={!canAddRole}
+                                  sx={{
+                                    width: 38,
+                                    height: 28,
+                                    borderRadius: 1,
+                                    border: accentBorder,
+                                    color: accent,
+                                    bgcolor: '#fff',
+                                  }}
+                                >
+                                  <Typography sx={{ fontWeight: 900, lineHeight: 1 }}>+</Typography>
+                                </IconButton>
+                              </Box>
+                            </Box>
+
+                            {/* 音色已改为每个角色单独一行 */}
                           </Box>
-                        ))}
-                      </Box>
-                    </Box>
-                  );
-                })()}
+
+                          {/* 操作（左） */}
+                          <Box
+                            sx={{
+                              borderRight: gridBorder,
+                              display: 'flex',
+                              alignItems: 'flex-start',
+                              justifyContent: 'center',
+                              pt: 3.2,
+                            }}
+                          >
+                            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.6, alignItems: 'center' }}>
+                              <Button
+                                variant="outlined"
+                                size="small"
+                                sx={{ minWidth: 72, fontWeight: 800, borderWidth: 2, borderColor: accent, color: accent }}
+                              >
+                                生成
+                              </Button>
+                              <Button
+                                variant="outlined"
+                                size="small"
+                                sx={{ minWidth: 72, fontWeight: 800, borderWidth: 2, borderColor: accent, color: accent }}
+                              >
+                                重新生成
+                              </Button>
+                            </Box>
+                          </Box>
+
+                          {/* 九宫格图像 */}
+                          <Box sx={{ borderRight: gridBorder }} />
+
+                          {/* 视频脚本 */}
+                          <Box sx={{ borderRight: gridBorder }} />
+
+                          {/* 生成视频 */}
+                          <Box sx={{ borderRight: gridBorder }} />
+
+                          {/* 操作（右） */}
+                          <Box sx={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'center', pt: 4 }}>
+                            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.6 }}>
+                              <Button
+                                variant="outlined"
+                                size="small"
+                                sx={{ minWidth: 72, fontWeight: 800, borderWidth: 2, borderColor: accent, color: accent }}
+                              >
+                                生成
+                              </Button>
+                              <Button
+                                variant="outlined"
+                                size="small"
+                                sx={{ minWidth: 72, fontWeight: 800, borderWidth: 2, borderColor: accent, color: accent }}
+                              >
+                                重新生成
+                              </Button>
+                              {canDelete ? (
+                                <Button
+                                  variant="outlined"
+                                  size="small"
+                                  onClick={() => deleteRow(row.id)}
+                                  sx={{
+                                    minWidth: 72,
+                                    fontWeight: 800,
+                                    borderWidth: 2,
+                                    borderColor: accent,
+                                    color: accent,
+                                  }}
+                                >
+                                  删除行
+                                </Button>
+                              ) : (
+                                <Box sx={{ height: 30 }} />
+                              )}
+                            </Box>
+                          </Box>
+                        </Box>
+                      );
+                    })}
+                  </Box>
+                </Box>
               </Paper>
 
               {/* 容器外边底部的按钮：只保留图标（无白色方块底） */}
@@ -393,7 +760,7 @@ const NewsPage: React.FC = () => {
                   <Box
                     role="button"
                     aria-label="增加视频栏"
-                    onClick={() => setAnimationRows((v) => v + 1)}
+                    onClick={addRow}
                     sx={{
                       width: 22,
                       height: 22,

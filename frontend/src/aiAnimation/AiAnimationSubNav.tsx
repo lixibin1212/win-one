@@ -30,12 +30,40 @@ export const AiAnimationSubNav: React.FC<{
     '&:hover': { bgcolor: 'transparent', color: '#f97316' },
   });
 
-  const sepSx = {
+  const sepContainerSx = {
     px: 0.6,
-    color: '#0f172a',
-    fontWeight: 900,
+    fontWeight: 800,
+    fontSize: '13px',
     userSelect: 'none' as const,
+    display: 'inline-flex',
+    alignItems: 'center',
   };
+
+  const arrowSx = (index: number) => ({
+    display: 'inline-block',
+    color: '#f4f3f2ff',
+    animation: 'flowDark 1.5s infinite ease-in-out',
+    animationDelay: `${index * 0.3}s`,
+    '@keyframes flowDark': {
+      '0%, 100%': {
+        color: '#58bbf9ff',
+      },
+      '50%': {
+        color: '#f4f6f8ff',
+    
+      },
+    },
+  });
+
+  const renderArrows = () => (
+    <Box component="span" sx={sepContainerSx}>
+      {['〉', '〉', '〉'].map((char, i) => (
+        <Box component="span" key={i} sx={arrowSx(i)}>
+          {char}
+        </Box>
+      ))}
+    </Box>
+  );
 
   return (
     <Box sx={{ display: 'flex', alignItems: 'center', gap: 0, justifyContent: 'flex-start' }}>
@@ -45,18 +73,14 @@ export const AiAnimationSubNav: React.FC<{
           角色形象生成
         </Box>
       </Button>
-      <Box component="span" sx={sepSx}>
-        /
-      </Box>
+      {renderArrows()}
       <Button variant="text" sx={itemSx(value === 'script')} onClick={() => onChange('script')}>
         <Box sx={{ display: 'inline-flex', alignItems: 'center' }}>
           <Box component="img" src={iconSrc(value === 'script')} alt="" sx={iconSx} />
           脚本生成
         </Box>
       </Button>
-      <Box component="span" sx={sepSx}>
-        /
-      </Box>
+      {renderArrows()}
       <Button variant="text" sx={itemSx(value === 'animation')} onClick={() => onChange('animation')}>
         <Box sx={{ display: 'inline-flex', alignItems: 'center' }}>
           <Box component="img" src={iconSrc(value === 'animation')} alt="" sx={iconSx} />

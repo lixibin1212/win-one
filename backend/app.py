@@ -103,6 +103,10 @@ MJ_API_KEY = os.getenv("XGAI_MJ_API_KEY", "")
 GEMINI_API_KEY = os.getenv("XGAI_GEMINI_API_KEY", "")
 GEMINI_MODEL = os.getenv("XGAI_GEMINI_MODEL", "gemini-3-pro-preview-thinking-*")
 
+# === Wavespeed (WAN 2.1 VACE) Proxy Configuration ===
+WAVESPEED_API_KEY = os.getenv("WAVESPEED_API_KEY", "")
+WAVESPEED_BASE_URL = os.getenv("WAVESPEED_BASE_URL", "https://api.wavespeed.ai/api/v3")
+
 # === 初始化 FastAPI ===
 app = FastAPI(title="安全认证系统", version="2.0.0")
 
@@ -234,8 +238,104 @@ class GeminiAnalyzeRequest(BaseModel):
     text: str
 
 
+class WavespeedVaceRequest(BaseModel):
+    prompt: str
+    negative_prompt: Optional[str] = ""
+    task: str = "depth"
+    images: Optional[list[str]] = None
+    video: Optional[str] = None
+    mask_video: Optional[str] = None
+    duration: Optional[int] = 10
+    size: str = "832*480"
+    num_inference_steps: Optional[int] = 30
+    guidance_scale: Optional[float] = 5
+    flow_shift: Optional[int] = 16
+    context_scale: Optional[float] = 1
+    seed: Optional[int] = -1
+
+
 class XgaiScriptAnalyzeRequest(BaseModel):
     text: str
+
+
+class XgaiRoleVoiceAnalyzeRequest(BaseModel):
+    tweet_text: str
+
+
+class XgaiVideoScriptGenerateRequest(BaseModel):
+    role_name: str
+    voice_type: Optional[str] = ""
+    speed: Optional[str] = ""
+    tone: Optional[str] = ""
+    volume: Optional[str] = ""
+
+
+def _xgai_streaming_payload(model: str, prompt_text: str) -> dict:
+    return {
+        "model": model,
+        "stream": True,
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": prompt_text,
+                    }
+                ],
+            }
+        ],
+        "max_tokens": 4000,
+    }
+
+
+def _get_xgai_script_key_and_model():
+    api_key = os.getenv("XGAI_SCRIPT_API_KEY") or GEMINI_API_KEY
+    model = os.getenv("XGAI_SCRIPT_MODEL", "gemini-3-pro-preview-thinking-*")
+    if not api_key:
+        raise HTTPException(status_code=500, detail="XGAI Script API Key 未配置")
+    return api_key, model
+
+
+def _xgai_streaming_response(prompt_text: str):
+    api_key, model = _get_xgai_script_key_and_model()
+    url = f"{XGAI_BASE_URL}/v1/chat/completions"
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {api_key}",
+    }
+    payload = _xgai_streaming_payload(model, prompt_text)
+
+    async def streamer():
+        async with httpx.AsyncClient(timeout=None) as client:
+            async with client.stream("POST", url, json=payload, headers=headers) as resp:
+                if resp.status_code != 200:
+                    body = await resp.aread()
+                    logger.error(f"XGAI Proxy Error: {body[:2000]!r}")
+                    raise HTTPException(status_code=resp.status_code, detail="XGAI 调用失败")
+
+                buffer = ""
+                async for chunk in resp.aiter_text():
+                    if not chunk:
+                        continue
+                    buffer += chunk
+
+                    parts = []
+                    if "\n\n" in buffer:
+                        parts = buffer.split("\n\n")
+                        buffer = parts.pop()
+                    elif "\n" in buffer:
+                        parts = buffer.split("\n")
+                        buffer = parts.pop()
+
+                    for p in parts:
+                        for t in _iter_gemini_delta_text(p):
+                            yield t
+
+                for t in _iter_gemini_delta_text(buffer):
+                    yield t
+
+    return StreamingResponse(streamer(), media_type="text/plain; charset=utf-8")
 
 
 class MjSubmitImagineRequest(BaseModel):
@@ -1767,11 +1867,7 @@ def _iter_gemini_delta_text(raw_chunk: str):
 
 @app.post("/api/proxy/xgai/script-analyze")
 async def xgai_script_analyze(req: XgaiScriptAnalyzeRequest, user=Depends(get_current_user)):
-    api_key = os.getenv("XGAI_SCRIPT_API_KEY") or GEMINI_API_KEY
-    model = os.getenv("XGAI_SCRIPT_MODEL", "gemini-3-pro-preview-thinking-*")
-    if not api_key:
-        raise HTTPException(status_code=500, detail="XGAI Script API Key 未配置")
-
+    api_key, model = _get_xgai_script_key_and_model()
     url = f"{XGAI_BASE_URL}/v1/chat/completions"
     headers = {
         "Content-Type": "application/json",
@@ -1789,22 +1885,7 @@ async def xgai_script_analyze(req: XgaiScriptAnalyzeRequest, user=Depends(get_cu
         f"推文内容：{user_text}"
     )
 
-    payload = {
-        "model": model,
-        "stream": True,
-        "messages": [
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "text",
-                        "text": prompt_text,
-                    }
-                ],
-            }
-        ],
-        "max_tokens": 4000,
-    }
+    payload = _xgai_streaming_payload(model, prompt_text)
 
     async def streamer():
         async with httpx.AsyncClient(timeout=None) as client:
@@ -1836,6 +1917,42 @@ async def xgai_script_analyze(req: XgaiScriptAnalyzeRequest, user=Depends(get_cu
                     yield t
 
     return StreamingResponse(streamer(), media_type="text/plain; charset=utf-8")
+
+
+@app.post("/api/proxy/xgai/role-voice-analyze")
+async def xgai_role_voice_analyze(req: XgaiRoleVoiceAnalyzeRequest, user=Depends(get_current_user)):
+    tweet_text = (req.tweet_text or "").strip()
+    prompt_text = (
+        "请分析以下推文内容，提炼所有关键角色音色特征，并进行音色设计（仅输出角色音色相关内容，无需分镜、分镜脚本等无关信息）。"
+        "要求：1. 每个角色单独标注，且【角色名称】必须独占一行并位于行首（格式：【角色名称】）；除角色标题外，禁止在正文中出现中文方括号【】；"
+        "2. 每个角色内容需包含1个模块：① 音色设计（含音色类型、语速、语气、音量，需具体可执行）；"
+        "2. 适配推文对应的风格，所有描述精准可听觉化；"
+        "3. 在每个角色的“音色设计”模块末尾追加一行参数，并严格使用等号与分号：音色类型=...;语速=...;语气=...;音量=...；"
+        "4. 不要复述/回显推文内容。"
+        f"推文内容：【{tweet_text}】"
+    )
+    return _xgai_streaming_response(prompt_text)
+
+
+@app.post("/api/proxy/xgai/video-script-generate")
+async def xgai_video_script_generate(req: XgaiVideoScriptGenerateRequest, user=Depends(get_current_user)):
+    role_name = (req.role_name or "角色1").strip() or "角色1"
+    voice_type = (req.voice_type or "").strip()
+    speed = (req.speed or "中速").strip() or "中速"
+    tone = (req.tone or "沉稳").strip() or "沉稳"
+    volume = (req.volume or "中").strip() or "中"
+    role_line = f"角色1（{role_name}）：{voice_type or '参考音色设计'}，语速{speed}，语气{tone}，音量{volume}"
+
+    prompt_text = (
+        "基于上传的nanobanana 3×3九宫格分镜图，生成短视频。"
+        "要求：1. 视觉适配：严格按九宫格分镜顺序生成，每个镜头的角色、场景、动作、景别与九宫格100%一致，风格、色调、光影同步匹配，无画面偏差、跳帧或多余元素；"
+        "2. 音频要求：① 角色语音：按以下参数生成——"
+        f"{role_line}；角色2（××）：××音色，××语速，××语气，××音量；"
+        "② 音画同步：口型与台词精准匹配，音频与画面同步误差≤0.2秒；"
+        "③ 环境与锚点：环境音符合场景设定，无多余音效；完整保留第9镜的上下集衔接音频锚点；"
+        "3. 镜头节奏：单镜头时长0.8-1.2秒，转场自然无跳切，核心动作清晰突出，总时长控制在8-10秒，适配短视频传播。"
+    )
+    return _xgai_streaming_response(prompt_text)
 
 
 @app.post("/api/proxy/gemini/analyze")
@@ -1900,6 +2017,72 @@ async def gemini_analyze(req: GeminiAnalyzeRequest, user=Depends(get_current_use
                     yield t
 
     return StreamingResponse(streamer(), media_type="text/plain; charset=utf-8")
+
+
+# === Wavespeed (WAN 2.1 VACE) Proxy APIs ===
+
+
+@app.post("/api/proxy/wavespeed/vace")
+async def wavespeed_vace_create(req: WavespeedVaceRequest, user=Depends(get_current_user)):
+    """Wavespeed WAN 2.1 VACE 创建任务代理（避免前端暴露 API Key）"""
+    if not WAVESPEED_API_KEY:
+        raise HTTPException(status_code=500, detail="WAVESPEED_API_KEY 未配置")
+
+    url = f"{WAVESPEED_BASE_URL}/wavespeed-ai/wan-2.1-14b-vace"
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {WAVESPEED_API_KEY}",
+    }
+    payload = {
+        "prompt": req.prompt,
+        "negative_prompt": req.negative_prompt or "",
+        "task": req.task,
+        "images": req.images or [],
+        "video": req.video,
+        "duration": req.duration,
+        "size": req.size,
+        "num_inference_steps": req.num_inference_steps,
+        "guidance_scale": req.guidance_scale,
+        "flow_shift": req.flow_shift,
+        "context_scale": req.context_scale,
+        "seed": req.seed,
+    }
+    if req.mask_video:
+        payload["mask_video"] = req.mask_video
+
+    async with httpx.AsyncClient() as client:
+        try:
+            resp = await client.post(url, json=payload, headers=headers, timeout=60.0)
+            if resp.status_code != 200:
+                logger.error(f"Wavespeed VACE Error: {resp.text}")
+                raise HTTPException(status_code=resp.status_code, detail="Wavespeed VACE 调用失败")
+            return resp.json()
+        except httpx.RequestError as e:
+            logger.error(f"Wavespeed VACE Request Error: {e}")
+            raise HTTPException(status_code=500, detail="Wavespeed VACE 请求异常")
+
+
+@app.get("/api/proxy/wavespeed/predictions/{prediction_id}/result")
+async def wavespeed_vace_result(prediction_id: str, user=Depends(get_current_user)):
+    """Wavespeed WAN 2.1 VACE 查询任务结果代理"""
+    if not WAVESPEED_API_KEY:
+        raise HTTPException(status_code=500, detail="WAVESPEED_API_KEY 未配置")
+
+    url = f"{WAVESPEED_BASE_URL}/predictions/{prediction_id}/result"
+    headers = {
+        "Authorization": f"Bearer {WAVESPEED_API_KEY}",
+    }
+
+    async with httpx.AsyncClient() as client:
+        try:
+            resp = await client.get(url, headers=headers, timeout=60.0)
+            if resp.status_code != 200:
+                logger.error(f"Wavespeed Result Error: {resp.text}")
+                raise HTTPException(status_code=resp.status_code, detail="Wavespeed 结果查询失败")
+            return resp.json()
+        except httpx.RequestError as e:
+            logger.error(f"Wavespeed Result Request Error: {e}")
+            raise HTTPException(status_code=500, detail="Wavespeed 结果查询异常")
 
 # === 启动事件 ===
 @app.on_event("startup")

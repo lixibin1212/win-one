@@ -75,7 +75,7 @@ const LandingPage = () => {
               border: '3px solid transparent',
               color: 'white',
               borderRadius: '100px',
-              padding: '6px 24px',
+              padding: '3px 24px',
               textTransform: 'none',
               fontSize: '15px',
               fontWeight: 600,

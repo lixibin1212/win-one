@@ -19,11 +19,16 @@ import {
 } from '@mui/material';
 import LogoutIcon from '@mui/icons-material/Logout';
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
+import PersonAddAltOutlinedIcon from '@mui/icons-material/PersonAddAltOutlined';
+import { alpha, useTheme } from '@mui/material/styles';
 import { useAuth } from './AuthContext';
 import LogoCarousel from './LogoCarousel';
 import { AiAnimationSubNav, AiAnimationSubSection } from './aiAnimation/AiAnimationSubNav';
 import { RoleImageGeneratorPanel } from './aiAnimation/RoleImageGeneratorPanel';
 import { ScriptAnalysisPanel } from './aiAnimation/ScriptAnalysisPanel';
+import { AiVideoEditPage } from './aiAnimation/AiVideoEditPage';
+
+const API_BASE = process.env.REACT_APP_API_BASE || 'http://localhost:8000';
 
 const waveMove = keyframes`
   0% { background-position: 0% 50%; }
@@ -35,13 +40,22 @@ const shimmer = keyframes`
   100% { transform: translateX(200%) skewX(-20deg); }
 `;
 
+const dotJump = keyframes`
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.55; }
+  30% { transform: translateY(-5px); opacity: 1; }
+`;
+
 const NewsPage: React.FC = () => {
+  const theme = useTheme();
   const navigate = useNavigate();
   const location = useLocation();
   const { user, logout, loading } = useAuth();
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
+  const [topTab, setTopTab] = useState<'animation' | 'video'>('animation');
   const [sub, setSub] = useState<AiAnimationSubSection>('role');
   const [scriptInstance, setScriptInstance] = useState(0);
+  const [sendToAnimationLoading, setSendToAnimationLoading] = useState(false);
+  const [sendToAnimationError, setSendToAnimationError] = useState<string | null>(null);
 
   type RoleCard = {
     id: string;
@@ -53,20 +67,80 @@ const NewsPage: React.FC = () => {
   type VideoRow = {
     id: string;
     roleCards: RoleCard[];
+    storyboardScript: string;
+    videoScript: string;
   };
 
   const headers = useMemo(() => ['分镜脚本', '角色', '操作', '九宫格图像', '视频脚本', '生成视频', '操作'], []);
-  const gridCols = useMemo(() => '1.05fr 1.55fr 0.55fr 1.05fr 1.05fr 1.25fr 0.55fr', []);
+  const gridCols = useMemo(
+    () =>
+      'minmax(0, 1.05fr) minmax(0, 1.55fr) minmax(0, 0.55fr) minmax(0, 1.05fr) minmax(0, 1.05fr) minmax(0, 1.25fr) minmax(0, 0.55fr)',
+    []
+  );
   const tableLine = 'rgba(15, 23, 42, 0.18)';
   const gridBorder = `2px solid ${tableLine}`;
 
   const makeRow = (id: string): VideoRow => ({
     id,
     roleCards: [{ id: `${id}-role-1`, name: '未命名', imageDataUrl: null, voice: '' }],
+    storyboardScript: '',
+    videoScript: '',
   });
 
   const nextRowId = useRef(3);
   const [rows, setRows] = useState<VideoRow[]>(() => [makeRow('row-1'), makeRow('row-2')]);
+
+  const [rowLoading, setRowLoading] = useState<Record<string, { roles?: boolean; video?: boolean }>>({});
+  const [rowError, setRowError] = useState<Record<string, { roles?: string; video?: string }>>({});
+  const [rowRoleExpanded, setRowRoleExpanded] = useState<Record<string, boolean>>({});
+
+  const setRowLoadingFlag = (rowId: string, key: 'roles' | 'video', value: boolean) => {
+    setRowLoading((prev) => ({
+      ...prev,
+      [rowId]: {
+        ...(prev[rowId] || {}),
+        [key]: value,
+      },
+    }));
+  };
+
+  const setRowErrorText = (rowId: string, key: 'roles' | 'video', text: string | undefined) => {
+    setRowError((prev) => ({
+      ...prev,
+      [rowId]: {
+        ...(prev[rowId] || {}),
+        [key]: text,
+      },
+    }));
+  };
+
+  const toggleRowRoleExpanded = (rowId: string) => {
+    setRowRoleExpanded((prev) => ({
+      ...prev,
+      [rowId]: !prev[rowId],
+    }));
+  };
+
+  const JumpingDots: React.FC<{ color?: string }> = ({ color }) => (
+    <Box sx={{ display: 'inline-flex', alignItems: 'flex-end', gap: 0.45, lineHeight: 1 }}>
+      {[0, 1, 2].map((i) => (
+        <Box
+          // eslint-disable-next-line react/no-array-index-key
+          key={i}
+          component="span"
+          sx={{
+            width: 5,
+            height: 5,
+            borderRadius: '50%',
+            bgcolor: color || 'currentColor',
+            display: 'inline-block',
+            animation: `${dotJump} 900ms ease-in-out infinite`,
+            animationDelay: `${i * 120}ms`,
+          }}
+        />
+      ))}
+    </Box>
+  );
 
   const updateRow = (rowId: string, updater: (row: VideoRow) => VideoRow) => {
     setRows((prev) => prev.map((r) => (r.id === rowId ? updater(r) : r)));
@@ -94,10 +168,7 @@ const NewsPage: React.FC = () => {
       const nextIdx = Math.max(0, ...row.roleCards.map((c) => parseRoleNum(c.id))) + 1;
       return {
         ...row,
-        roleCards: [
-          ...row.roleCards,
-          { id: `${rowId}-role-${nextIdx}`, name: '未命名', imageDataUrl: null, voice: '' },
-        ],
+        roleCards: [...row.roleCards, { id: `${rowId}-role-${nextIdx}`, name: '未命名', imageDataUrl: null, voice: '' }],
       };
     });
   };
@@ -136,6 +207,255 @@ const NewsPage: React.FC = () => {
       ...row,
       roleCards: row.roleCards.map((c) => (c.id === roleId ? { ...c, imageDataUrl: dataUrl } : c)),
     }));
+  };
+
+  const setStoryboardScript = (rowId: string, storyboardScript: string) => {
+    updateRow(rowId, (row) => ({ ...row, storyboardScript }));
+  };
+
+  const setVideoScript = (rowId: string, videoScript: string) => {
+    updateRow(rowId, (row) => ({ ...row, videoScript }));
+  };
+
+  const buildAuthHeaders = (withJson: boolean): Record<string, string> => {
+    const headers: Record<string, string> = {};
+    if (withJson) headers['Content-Type'] = 'application/json';
+    const token = localStorage.getItem('access_token');
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    return headers;
+  };
+
+  const streamTextPost = async (path: string, body: unknown, onChunk?: (chunk: string) => void): Promise<string> => {
+    const res = await fetch(`${API_BASE}${path}`, {
+      method: 'POST',
+      headers: buildAuthHeaders(true),
+      body: JSON.stringify(body),
+    });
+
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      throw new Error(text || `请求失败（HTTP ${res.status}）`);
+    }
+
+    if (!res.body) {
+      const text = await res.text().catch(() => '');
+      if (onChunk && text) onChunk(text);
+      return text;
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder('utf-8');
+    let full = '';
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      const chunk = decoder.decode(value, { stream: true });
+      if (!chunk) continue;
+      full += chunk;
+      onChunk?.(chunk);
+    }
+    return full;
+  };
+
+  type ExtractedRole = {
+    name: string;
+    voiceRaw: string;
+    voiceType?: string;
+    speed?: string;
+    tone?: string;
+    volume?: string;
+  };
+
+  const extractRolesFromAnalysis = (analysisText: string): ExtractedRole[] => {
+    const text = (analysisText || '')
+      .replace(/\r\n/g, '\n')
+      .replace(/\r/g, '\n')
+      .replace(/\*\*/g, '');
+    const matches: Array<{ index: number; full: string; name: string }> = [];
+    // 只把“行首的【角色名】”当作角色分段，避免正文里出现【】导致串位
+    const re = /(^|\n)([ \t]*)【([^】\n]+)】/g;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(text)) !== null) {
+      const leadingNewline = m[1] || '';
+      const leadingSpaces = m[2] || '';
+      const name = (m[3] || '').trim();
+      const index = (m.index ?? 0) + leadingNewline.length + leadingSpaces.length;
+      const full = `【${name}】`;
+      matches.push({ index, full, name });
+    }
+    if (!matches.length) return [];
+
+    const roles: ExtractedRole[] = [];
+    for (let i = 0; i < matches.length; i += 1) {
+      const name = matches[i]?.name || '';
+      const start = (matches[i].index ?? 0) + matches[i].full.length;
+      const end = i + 1 < matches.length ? (matches[i + 1].index ?? text.length) : text.length;
+      const section = text.slice(start, end);
+
+      // 现在提示词只要求“音色设计”，因此音色格子只保留该部分内容
+      const norm = section.trim();
+      const idx1 = norm.search(/(?:①\s*)?音色设计\s*[:：]/);
+      const voiceRaw = (idx1 >= 0 ? norm.slice(idx1) : norm)
+        .replace(/^[-*\s]+/gm, '')
+        .trim();
+
+      const getParam = (key: string) => {
+        const m = voiceRaw.match(new RegExp(`${key}\\s*(?:=|[:：])\\s*([^;；\n]+)`, 'i'));
+        return m?.[1]?.trim();
+      };
+
+      const role: ExtractedRole = {
+        name,
+        voiceRaw,
+        voiceType: getParam('音色类型'),
+        speed: getParam('语速'),
+        tone: getParam('语气'),
+        volume: getParam('音量'),
+      };
+
+      roles.push(role);
+    }
+    return roles.filter((r) => r.name);
+  };
+
+  const applyRolesToRow = (rowId: string, roles: ExtractedRole[]) => {
+    if (!roles.length) return;
+    updateRow(rowId, (row) => {
+      const nextRoleCards = row.roleCards.slice();
+
+      const parseRoleNum = (id: string) => {
+        const m = id.match(/-role-(\d+)$/);
+        return m ? Number(m[1]) : 0;
+      };
+      let nextIdx = Math.max(0, ...nextRoleCards.map((c) => parseRoleNum(c.id))) + 1;
+
+      while (nextRoleCards.length < roles.length && nextRoleCards.length < 11) {
+        nextRoleCards.push({ id: `${rowId}-role-${nextIdx}`, name: '未命名', imageDataUrl: null, voice: '' });
+        nextIdx += 1;
+      }
+
+      for (let i = 0; i < Math.min(roles.length, nextRoleCards.length); i += 1) {
+        const role = roles[i];
+        const voice = role.voiceRaw || '';
+        nextRoleCards[i] = { ...nextRoleCards[i], name: role.name || nextRoleCards[i].name, voice };
+      }
+
+      return { ...row, roleCards: nextRoleCards };
+    });
+  };
+
+  const applyAllToFirstEmptyRow = (payload: { storyboardScript: string; roles: ExtractedRole[]; videoScript: string }): string => {
+    const { storyboardScript, roles, videoScript } = payload;
+    const isEmpty = (s: string) => !String(s || '').trim();
+
+    // 先基于当前 rows 选择目标行（避免依赖 setState updater 的副作用返回值）
+    let chosenId: string | undefined = rows.find((r, idx) => idx === 0 && isEmpty(r.storyboardScript))?.id;
+    if (!chosenId) chosenId = rows.find((r) => isEmpty(r.storyboardScript))?.id;
+    const finalId = chosenId || `row-${nextRowId.current}`;
+    if (!chosenId) nextRowId.current += 1;
+
+    setRows((prev) => {
+      const next = prev.slice();
+      let idx = next.findIndex((r) => r.id === finalId);
+      if (idx < 0) {
+        next.push(makeRow(finalId));
+        idx = next.length - 1;
+      }
+      const base = next[idx];
+      let nextRoleCards = base.roleCards.slice();
+
+      // 自动补足角色卡到最多 11 个
+      const parseRoleNum = (id: string) => {
+        const m = id.match(/-role-(\d+)$/);
+        return m ? Number(m[1]) : 0;
+      };
+      let nextIdx = Math.max(0, ...nextRoleCards.map((c) => parseRoleNum(c.id))) + 1;
+      while (nextRoleCards.length < roles.length && nextRoleCards.length < 11) {
+        nextRoleCards.push({ id: `${finalId}-role-${nextIdx}`, name: '未命名', imageDataUrl: null, voice: '' });
+        nextIdx += 1;
+      }
+      for (let i = 0; i < Math.min(roles.length, nextRoleCards.length); i += 1) {
+        const role = roles[i];
+        nextRoleCards[i] = { ...nextRoleCards[i], name: role.name || nextRoleCards[i].name, voice: role.voiceRaw || '' };
+      }
+
+      next[idx] = {
+        ...base,
+        storyboardScript,
+        roleCards: nextRoleCards,
+        videoScript,
+      };
+      return next;
+    });
+
+    return finalId;
+  };
+
+  const runRoleVoiceAnalysis = async (tweetText: string): Promise<ExtractedRole[]> => {
+    const full = await streamTextPost('/api/proxy/xgai/role-voice-analyze', { tweet_text: tweetText });
+    return extractRolesFromAnalysis(full);
+  };
+
+  const runVideoScriptGenerate = async (rowId: string, firstRole: ExtractedRole | null) => {
+    const name = firstRole?.name || '角色1';
+    const voiceType = firstRole?.voiceType || '';
+    const speed = firstRole?.speed || '中速';
+    const tone = firstRole?.tone || '沉稳';
+    const volume = firstRole?.volume || '中';
+
+    let accum = '';
+    await streamTextPost(
+      '/api/proxy/xgai/video-script-generate',
+      { role_name: name, voice_type: voiceType, speed, tone, volume },
+      (chunk) => {
+      accum += chunk;
+      setVideoScript(rowId, accum);
+      }
+    );
+  };
+
+  const handleSendToAnimation = async (payload: { tweetText: string; storyboardScript: string }) => {
+    const storyboard = payload.storyboardScript;
+    if (!storyboard.trim()) return;
+    if (sendToAnimationLoading) return;
+
+    setSendToAnimationLoading(true);
+    setSendToAnimationError(null);
+
+    try {
+      const roles = await runRoleVoiceAnalysis(payload.tweetText);
+      if (!roles.length) {
+        throw new Error('未解析到任何【角色名称】段，请检查角色分析输出格式');
+      }
+      const firstRole = roles[0] || null;
+
+      // 等到完整视频脚本生成完毕后，再跳转并一次性写入（满足“等待结果再跳转”）
+      const name = firstRole?.name || '角色1';
+      const voiceType = firstRole?.voiceType || '';
+      const speed = firstRole?.speed || '中速';
+      const tone = firstRole?.tone || '沉稳';
+      const volume = firstRole?.volume || '中';
+
+      const videoScript = await streamTextPost('/api/proxy/xgai/video-script-generate', {
+        role_name: name,
+        voice_type: voiceType,
+        speed,
+        tone,
+        volume,
+      });
+
+      // 结果齐全后：对“第一空行”一次性写入 + 跳转到动画制作
+      applyAllToFirstEmptyRow({ storyboardScript: storyboard, roles, videoScript });
+      setSub('animation');
+    } catch (e) {
+      const msg = String((e as Error)?.message || e || '');
+      const isAuth = /401|unauthorized|forbidden|403/i.test(msg);
+      setSendToAnimationError(
+        isAuth ? '未登录或登录已过期（请先登录）' : msg || '接口失败（请确认后端在运行且已配置 Key）'
+      );
+    } finally {
+      setSendToAnimationLoading(false);
+    }
   };
 
   const handleSubChange = (next: AiAnimationSubSection) => {
@@ -372,11 +692,12 @@ const NewsPage: React.FC = () => {
         {/* 保持 LogoCarousel 全宽，以保留两侧的背景/渐隐效果 */}
         <Box sx={{ width: '100%' }}>
           <LogoCarousel
-            activeIndex={0}
+            activeIndex={topTab === 'animation' ? 0 : 1}
             navigateOnSelect={false}
             persistKey="main"
             onSelect={(index) => {
-              if (index === 1) navigate('/ai-video-edit');
+              if (index === 0) setTopTab('animation');
+              if (index === 1) setTopTab('video');
             }}
           />
         </Box>
@@ -390,33 +711,44 @@ const NewsPage: React.FC = () => {
             px: { xs: 0.5, sm: 1, md: 2 },
           }}
         >
-          <Box sx={{ mt: 10, mb: 3, width: '100%' }}>
-            <AiAnimationSubNav value={sub} onChange={handleSubChange} />
-          </Box>
-
-          {sub === 'role' ? (
-            <Box sx={{ mb: 3 }}>
-              <RoleImageGeneratorPanel />
-            </Box>
-          ) : sub === 'script' ? (
-            <Box sx={{ mb: 3 }}>
-              <ScriptAnalysisPanel key={`script-${scriptInstance}`} />
+          {topTab === 'video' ? (
+            <Box sx={{ mt: 10, mb: 3, width: '100%' }}>
+              <AiVideoEditPage embedded />
             </Box>
           ) : (
-            <Box>
-              <Paper
-                elevation={0}
-                sx={{
-                  p: 0,
-                  bgcolor: 'rgba(255, 255, 255, 0.75)',
-                  backdropFilter: 'blur(20px) saturate(180%)',
-                  border: '1px solid rgba(255, 255, 255, 0.6)',
-                  borderRadius: '16px',
-                  overflow: 'hidden',
-                  width: '100%',
-                  minHeight: { xs: 220, md: 260 },
-                }}
-              >
+            <>
+              <Box sx={{ mt: 10, mb: 3, width: '100%' }}>
+                <AiAnimationSubNav value={sub} onChange={handleSubChange} />
+              </Box>
+
+              {sub === 'role' ? (
+                <Box sx={{ mb: 3 }}>
+                  <RoleImageGeneratorPanel />
+                </Box>
+              ) : sub === 'script' ? (
+                <Box sx={{ mb: 3 }}>
+                  <ScriptAnalysisPanel
+                    key={`script-${scriptInstance}`}
+                    onSendToAnimation={handleSendToAnimation}
+                    sendToAnimationLoading={sendToAnimationLoading}
+                    sendToAnimationError={sendToAnimationError}
+                  />
+                </Box>
+              ) : (
+                <Box>
+                  <Paper
+                    elevation={0}
+                    sx={{
+                      p: 0,
+                      bgcolor: 'rgba(255, 255, 255, 0.75)',
+                      backdropFilter: 'blur(20px) saturate(180%)',
+                      border: '1px solid rgba(255, 255, 255, 0.6)',
+                      borderRadius: '16px',
+                      overflow: 'hidden',
+                      width: '100%',
+                      minHeight: { xs: 220, md: 260 },
+                    }}
+                  >
                 <Box
                   sx={{
                     width: '100%',
@@ -452,8 +784,116 @@ const NewsPage: React.FC = () => {
                     {rows.map((row, rowIdx) => {
                       const canDelete = rowIdx > 0;
                       const canAddRole = row.roleCards.length < 11;
-                      const accent = '#ef4444';
-                      const accentBorder = `2px solid ${accent}`;
+                      const isRolesLoading = Boolean(rowLoading[row.id]?.roles);
+                      const isVideoLoading = Boolean(rowLoading[row.id]?.video);
+                      const rolesError = rowError[row.id]?.roles;
+                      const videoError = rowError[row.id]?.video;
+                      const isRoleExpanded = Boolean(rowRoleExpanded[row.id]);
+                      const accent = theme.palette.primary.main;
+                      const primaryBtnSx = {
+                        minWidth: 86,
+                        height: 34,
+                        px: 2.2,
+                        fontWeight: 900,
+                        borderRadius: '8px',
+                        textTransform: 'none',
+                        letterSpacing: '0.02em',
+                        boxShadow: 'none',
+                        background: accent,
+                        '&:hover': {
+                          background: alpha(accent, 0.9),
+                          boxShadow: 'none',
+                        },
+                        '&:active': {
+                          transform: 'translateY(0.5px)',
+                        },
+                      } as const;
+
+                      const secondaryBtnSx = {
+                        minWidth: 86,
+                        height: 34,
+                        px: 2.2,
+                        fontWeight: 800,
+                        borderRadius: '10px',
+                        textTransform: 'none',
+                        letterSpacing: '0.02em',
+                        border: '1.5px solid',
+                        borderColor: 'rgba(255, 255, 255, 0.9)',
+                        color: '#1e293b',
+                        bgcolor: 'linear-gradient(135deg, rgba(255, 255, 255, 0.95) 0%, rgba(240, 247, 255, 0.9) 100%)',
+                        backdropFilter: 'blur(10px)',
+                        boxShadow: `
+                          0 2px 8px rgba(59, 130, 246, 0.15),
+                          0 4px 16px rgba(59, 130, 246, 0.1),
+                          inset 0 1px 0 rgba(255, 255, 255, 0.8)
+                        `,
+                        position: 'relative',
+                        overflow: 'visible',
+                        transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                        '&::before': {
+                          content: '""',
+                          position: 'absolute',
+                          inset: '-1.5px',
+                          borderRadius: '10px',
+                          padding: '1.5px',
+                          background: 'linear-gradient(135deg, rgba(59, 130, 246, 0.4) 0%, rgba(147, 197, 253, 0.2) 50%, rgba(59, 130, 246, 0.4) 100%)',
+                          WebkitMask: 'linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0)',
+                          WebkitMaskComposite: 'xor',
+                          maskComposite: 'exclude',
+                          opacity: 0.6,
+                          zIndex: -1,
+                        },
+                        '&::after': {
+                          content: '""',
+                          position: 'absolute',
+                          width: '6px',
+                          height: '6px',
+                          borderRadius: '50%',
+                          background: 'radial-gradient(circle, #3b82f6 0%, #60a5fa 50%, #93c5fd 100%)',
+                          boxShadow: `
+                            0 0 12px rgba(59, 130, 246, 0.8),
+                            0 0 24px rgba(59, 130, 246, 0.4),
+                            0 0 36px rgba(59, 130, 246, 0.2)
+                          `,
+                          animation: 'riceBorder 3s ease-in-out infinite, colorShift 12s ease-in-out infinite',
+                          pointerEvents: 'none',
+                          zIndex: 10,
+                          filter: 'brightness(1.2)',
+                        },
+                        '&:hover': {
+                          borderColor: 'rgba(255, 255, 255, 1)',
+                          transform: 'translateY(-2px)',
+                          boxShadow: `
+                            0 4px 16px rgba(59, 130, 246, 0.25),
+                            0 8px 32px rgba(59, 130, 246, 0.15),
+                            inset 0 1px 0 rgba(255, 255, 255, 1)
+                          `,
+                          '&::before': {
+                            opacity: 1,
+                          },
+                        },
+                        '&:active': {
+                          transform: 'translateY(0px)',
+                        },
+                      } as const;
+
+                      const dangerBtnSx = {
+                        minWidth: 86,
+                        height: 34,
+                        px: 2.2,
+                        fontWeight: 900,
+                        borderRadius: '8px',
+                        textTransform: 'none',
+                        letterSpacing: '0.01em',
+                        borderWidth: 2,
+                        borderColor: alpha(theme.palette.text.primary, 0.18),
+                        color: theme.palette.text.secondary,
+                        bgcolor: 'rgba(255,255,255,0.35)',
+                        '&:hover': {
+                          borderColor: alpha(theme.palette.text.primary, 0.26),
+                          bgcolor: 'rgba(255,255,255,0.55)',
+                        },
+                      } as const;
 
                       return (
                         <Box
@@ -462,14 +902,57 @@ const NewsPage: React.FC = () => {
                             display: 'grid',
                             gridTemplateColumns: gridCols,
                             width: '100%',
+                            height: isRoleExpanded ? 'auto' : { xs: 150, md: 190 },
                             minHeight: { xs: 150, md: 190 },
-                            height: 'auto',
                             bgcolor: 'rgba(255, 255, 255, 0.35)',
                             borderBottom: rowIdx === rows.length - 1 ? 'none' : gridBorder,
+                            position: 'relative',
                           }}
                         >
                           {/* 分镜脚本 */}
-                          <Box sx={{ borderRight: gridBorder }} />
+                          <Box
+                            onWheel={(e) => e.stopPropagation()}
+                            sx={{
+                              borderRight: gridBorder,
+                              px: { xs: 1.0, md: 1.2 },
+                              pt: { xs: 1.0, md: 1.2 },
+                              pb: { xs: 1.4, md: 1.6 },
+                              display: 'flex',
+                              alignItems: 'stretch',
+                              overflow: 'hidden',
+                            }}
+                          >
+                            <InputBase
+                              value={row.storyboardScript}
+                              onChange={(e) => setStoryboardScript(row.id, e.target.value)}
+                              multiline
+                              minRows={6}
+                              maxRows={10}
+                              placeholder="请输入分镜脚本"
+                              sx={{
+                                width: '100%',
+                                height: '100%',
+                                fontSize: 13,
+                                fontWeight: 500,
+                                color: theme.palette.text.secondary,
+                                '& textarea': {
+                                  height: '100% !important',
+                                  overflow: 'auto !important',
+                                  overflowX: 'hidden !important',
+                                  overscrollBehavior: 'contain',
+                                  scrollbarGutter: 'stable',
+                                  paddingBottom: '10px',
+                                  resize: 'none',
+                                  lineHeight: 1.35,
+                                  color: theme.palette.text.secondary,
+                                },
+                                '& textarea::placeholder': {
+                                  color: alpha(theme.palette.text.secondary, 0.8),
+                                  opacity: 1,
+                                },
+                              }}
+                            />
+                          </Box>
 
                           {/* 角色 */}
                           <Box
@@ -481,9 +964,41 @@ const NewsPage: React.FC = () => {
                               flexDirection: 'column',
                               gap: 1.2,
                               overflow: 'hidden',
+                              position: 'relative',
                             }}
                           >
-                            <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1.4 }}>
+                            {isRolesLoading ? (
+                              <Box
+                                sx={{
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: 0.8,
+                                  color: alpha(theme.palette.text.secondary, 0.92),
+                                  mb: 0.6,
+                                  userSelect: 'none',
+                                }}
+                              >
+                                <Typography sx={{ fontSize: 12, fontWeight: 800, color: 'inherit' }}>
+                                  角色/音色分析中
+                                </Typography>
+                                <JumpingDots color={alpha(theme.palette.text.secondary, 0.75)} />
+                              </Box>
+                            ) : null}
+                            {!isRolesLoading && rolesError ? (
+                              <Typography sx={{ fontSize: 12, fontWeight: 800, color: theme.palette.error.main, mb: 0.6 }}>
+                                {rolesError}
+                              </Typography>
+                            ) : null}
+                            <Box
+                              sx={{
+                                display: 'flex',
+                                alignItems: 'flex-start',
+                                gap: 1.4,
+                                overflow: isRoleExpanded ? 'visible' : 'hidden',
+                                flex: '1 1 auto',
+                                pb: 2.2,
+                              }}
+                            >
                               <Box
                                 sx={{
                                   display: 'flex',
@@ -513,6 +1028,7 @@ const NewsPage: React.FC = () => {
                                             lineHeight: 1.1,
                                             textAlign: 'left',
                                             alignSelf: 'center',
+                                            fontSize: '13px',
                                           }}
                                         >
                                           角色{roleNo}:
@@ -521,16 +1037,25 @@ const NewsPage: React.FC = () => {
                                         <Box
                                           onClick={() => fileInputRefs.current[inputKey]?.click()}
                                           role="button"
-                                          aria-label="上传角色图片"
+                                          aria-label="上传人物图片"
                                           sx={{
                                             width: 56,
                                             height: 64,
                                             borderRadius: 1,
-                                            border: accentBorder,
-                                            bgcolor: '#fff',
+                                            border: 2,
+                                            borderStyle: 'dashed',
+                                            borderColor: alpha(accent, 0.55),
+                                            bgcolor: `linear-gradient(180deg, ${alpha(accent, 0.10)} 0%, rgba(255,255,255,0.0) 100%)`,
                                             cursor: 'pointer',
                                             overflow: 'hidden',
                                             flex: '0 0 auto',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'center',
+                                            '&:hover': {
+                                              borderColor: alpha(accent, 0.75),
+                                              bgcolor: `linear-gradient(180deg, ${alpha(accent, 0.14)} 0%, rgba(255,255,255,0.0) 100%)`,
+                                            },
                                           }}
                                         >
                                           <input
@@ -555,7 +1080,24 @@ const NewsPage: React.FC = () => {
                                               sx={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
                                             />
                                           ) : (
-                                            <Box sx={{ width: '100%', height: '100%' }} />
+                                            <Box
+                                              sx={{
+                                                width: '100%',
+                                                height: '100%',
+                                                display: 'flex',
+                                                flexDirection: 'column',
+                                                alignItems: 'center',
+                                                justifyContent: 'center',
+                                                gap: 0.25,
+                                                color: alpha(accent, 0.9),
+                                                userSelect: 'none',
+                                              }}
+                                            >
+                                              <PersonAddAltOutlinedIcon sx={{ fontSize: 24, opacity: 0.92 }} />
+                                              <Typography sx={{ fontSize: 10, fontWeight: 900, lineHeight: 1 }}>
+                                                上传人物
+                                              </Typography>
+                                            </Box>
                                           )}
                                         </Box>
 
@@ -564,13 +1106,19 @@ const NewsPage: React.FC = () => {
                                             width: 76,
                                             height: 30,
                                             borderRadius: 1,
-                                            border: accentBorder,
-                                            bgcolor: '#fff',
+                                            border: '1px solid',
+                                            borderColor: alpha(accent, 0.35),
+                                            bgcolor: alpha(theme.palette.background.paper, 0.92),
                                             display: 'flex',
                                             alignItems: 'center',
                                             justifyContent: 'center',
                                             px: 0.5,
                                             flex: '0 0 auto',
+                                            transition: 'border-color 140ms ease, box-shadow 140ms ease',
+                                            '&:focus-within': {
+                                              borderColor: alpha(accent, 0.75),
+                                              boxShadow: `0 0 0 2px ${alpha(accent, 0.14)}`,
+                                            },
                                           }}
                                         >
                                           <InputBase
@@ -585,25 +1133,47 @@ const NewsPage: React.FC = () => {
                                           />
                                         </Box>
 
-                                        <IconButton
-                                          size="small"
-                                          onClick={() => deleteRoleCard(row.id, card.id)}
-                                          disabled={!canDeleteRole}
-                                          sx={{
-                                            width: 38,
-                                            height: 28,
-                                            borderRadius: 1,
-                                            border: accentBorder,
-                                            color: accent,
-                                            bgcolor: '#fff',
-                                            flex: '0 0 auto',
-                                          }}
-                                        >
-                                          <Typography sx={{ fontWeight: 900, lineHeight: 1 }}>-</Typography>
-                                        </IconButton>
+                                        <Tooltip title="减少角色" placement="top" arrow>
+                                          <Box component="span" sx={{ display: 'inline-flex', pointerEvents: 'auto' }}>
+                                            <IconButton
+                                              size="small"
+                                              aria-label="减少角色"
+                                              title="减少角色"
+                                              onClick={() => deleteRoleCard(row.id, card.id)}
+                                              disabled={!canDeleteRole}
+                                              sx={{
+                                                width: 28,
+                                                height: 28,
+                                                borderRadius: 1,
+                                                border: 'none',
+                                                boxShadow: 'none',
+                                                outline: 'none',
+                                                p: 0,
+                                                ml: -0.5,
+                                                color: accent,
+                                                bgcolor: 'transparent',
+                                                flex: '0 0 auto',
+                                                '&.Mui-focusVisible': {
+                                                  outline: 'none',
+                                                  boxShadow: 'none',
+                                                },
+                                                '&:focus': {
+                                                  outline: 'none',
+                                                },
+                                              }}
+                                            >
+                                              <Box
+                                                component="img"
+                                                src={`${process.env.PUBLIC_URL || ''}/reduce.svg`}
+                                                alt="减少角色"
+                                                sx={{ width: 16, height: 16, display: 'block' }}
+                                              />
+                                            </IconButton>
+                                          </Box>
+                                        </Tooltip>
                                       </Box>
 
-                                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.0 }}>
+                                      <Box sx={{ display: 'flex', alignItems: 'flex-end', gap: 1.0 }}>
                                         <Typography
                                           sx={{
                                             fontWeight: 900,
@@ -612,17 +1182,22 @@ const NewsPage: React.FC = () => {
                                             minWidth: 56,
                                             whiteSpace: 'nowrap',
                                             lineHeight: 1.1,
+                                            fontSize: '13px',
+                                            pb: '2px',
                                           }}
                                         >
                                           音色:
                                         </Typography>
                                         <Box
                                           sx={{
-                                            height: 34,
-                                            borderRadius: 1,
-                                            border: accentBorder,
-                                            bgcolor: '#fff',
-                                            px: 1,
+                                            minHeight: 34,
+                                            borderRadius: 0,
+                                            borderTop: 'none',
+                                            borderLeft: 'none',
+                                            borderRight: 'none',
+                                            borderBottom: `2px solid ${accent}`,
+                                            bgcolor: 'transparent',
+                                            px: 0,
                                             display: 'flex',
                                             alignItems: 'center',
                                             flex: '1 1 auto',
@@ -633,7 +1208,14 @@ const NewsPage: React.FC = () => {
                                           <InputBase
                                             value={card.voice}
                                             onChange={(e) => setRoleVoice(row.id, card.id, e.target.value)}
-                                            sx={{ width: '100%', fontSize: 13, '& input': { p: 0 } }}
+                                            multiline
+                                            sx={{
+                                              width: '100%',
+                                              fontSize: 13,
+                                              wordBreak: 'break-word',
+                                              '& input': { p: 0 },
+                                              '& textarea': { p: 0, lineHeight: 1.2 },
+                                            }}
                                           />
                                         </Box>
                                       </Box>
@@ -652,21 +1234,33 @@ const NewsPage: React.FC = () => {
                                   zIndex: 2,
                                 }}
                               >
-                                <IconButton
-                                  size="small"
-                                  onClick={() => addRoleCard(row.id)}
-                                  disabled={!canAddRole}
-                                  sx={{
-                                    width: 38,
-                                    height: 28,
-                                    borderRadius: 1,
-                                    border: accentBorder,
-                                    color: accent,
-                                    bgcolor: '#fff',
-                                  }}
-                                >
-                                  <Typography sx={{ fontWeight: 900, lineHeight: 1 }}>+</Typography>
-                                </IconButton>
+                                <Tooltip title="添加角色" placement="top" arrow>
+                                  <Box component="span" sx={{ display: 'inline-flex' }}>
+                                    <IconButton
+                                      size="small"
+                                      onClick={() => addRoleCard(row.id)}
+                                      disabled={!canAddRole}
+                                      aria-label="添加角色"
+                                      sx={{
+                                        width: 38,
+                                        height: 28,
+                                        borderRadius: 1,
+                                        border: 0,
+                                        color: accent,
+                                        bgcolor: 'transparent',
+                                        '&:hover': { bgcolor: 'transparent' },
+                                        '&.Mui-focusVisible': { outline: 'none' },
+                                      }}
+                                    >
+                                      <Box
+                                        component="img"
+                                        src={`${process.env.PUBLIC_URL}/add_2.svg`}
+                                        alt="添加角色"
+                                        sx={{ width: 16, height: 16, display: 'block' }}
+                                      />
+                                    </IconButton>
+                                  </Box>
+                                </Tooltip>
                               </Box>
                             </Box>
 
@@ -685,16 +1279,16 @@ const NewsPage: React.FC = () => {
                           >
                             <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.6, alignItems: 'center' }}>
                               <Button
-                                variant="outlined"
+                                variant="contained"
                                 size="small"
-                                sx={{ minWidth: 72, fontWeight: 800, borderWidth: 2, borderColor: accent, color: accent }}
+                                sx={primaryBtnSx}
                               >
                                 生成
                               </Button>
                               <Button
                                 variant="outlined"
                                 size="small"
-                                sx={{ minWidth: 72, fontWeight: 800, borderWidth: 2, borderColor: accent, color: accent }}
+                                sx={secondaryBtnSx}
                               >
                                 重新生成
                               </Button>
@@ -705,7 +1299,88 @@ const NewsPage: React.FC = () => {
                           <Box sx={{ borderRight: gridBorder }} />
 
                           {/* 视频脚本 */}
-                          <Box sx={{ borderRight: gridBorder }} />
+                          <Box
+                            onWheel={(e) => e.stopPropagation()}
+                            sx={{
+                              borderRight: gridBorder,
+                              px: { xs: 1.0, md: 1.2 },
+                              pt: { xs: 1.0, md: 1.2 },
+                              pb: { xs: 1.4, md: 1.6 },
+                              display: 'flex',
+                              alignItems: 'stretch',
+                              overflow: 'hidden',
+                              position: 'relative',
+                            }}
+                          >
+                            {isVideoLoading && !String(row.videoScript || '').trim() ? (
+                              <Box
+                                sx={{
+                                  position: 'absolute',
+                                  top: 10,
+                                  left: 12,
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: 0.8,
+                                  pointerEvents: 'none',
+                                  color: alpha(theme.palette.text.secondary, 0.9),
+                                  userSelect: 'none',
+                                  zIndex: 1,
+                                }}
+                              >
+                                <Typography sx={{ fontSize: 12, fontWeight: 800, color: 'inherit' }}>
+                                  视频脚本生成中
+                                </Typography>
+                                <JumpingDots color={alpha(theme.palette.text.secondary, 0.75)} />
+                              </Box>
+                            ) : null}
+                            {!isVideoLoading && !String(row.videoScript || '').trim() && videoError ? (
+                              <Box
+                                sx={{
+                                  position: 'absolute',
+                                  top: 10,
+                                  left: 12,
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  pointerEvents: 'none',
+                                  userSelect: 'none',
+                                  zIndex: 1,
+                                }}
+                              >
+                                <Typography sx={{ fontSize: 12, fontWeight: 800, color: theme.palette.error.main }}>
+                                  {videoError}
+                                </Typography>
+                              </Box>
+                            ) : null}
+                            <InputBase
+                              value={row.videoScript}
+                              onChange={(e) => setVideoScript(row.id, e.target.value)}
+                              multiline
+                              minRows={6}
+                              maxRows={10}
+                              placeholder="请输入视频脚本"
+                              sx={{
+                                width: '100%',
+                                height: '100%',
+                                fontSize: 13,
+                                fontWeight: 500,
+                                color: theme.palette.text.secondary,
+                                '& textarea': {
+                                  height: '100% !important',
+                                  overflow: 'auto !important',
+                                  overscrollBehavior: 'contain',
+                                  scrollbarGutter: 'stable',
+                                  paddingBottom: '10px',
+                                  resize: 'none',
+                                  lineHeight: 1.35,
+                                  color: theme.palette.text.secondary,
+                                },
+                                '& textarea::placeholder': {
+                                  color: alpha(theme.palette.text.secondary, 0.8),
+                                  opacity: 1,
+                                },
+                              }}
+                            />
+                          </Box>
 
                           {/* 生成视频 */}
                           <Box sx={{ borderRight: gridBorder }} />
@@ -714,16 +1389,16 @@ const NewsPage: React.FC = () => {
                           <Box sx={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'center', pt: 4 }}>
                             <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.6 }}>
                               <Button
-                                variant="outlined"
+                                variant="contained"
                                 size="small"
-                                sx={{ minWidth: 72, fontWeight: 800, borderWidth: 2, borderColor: accent, color: accent }}
+                                sx={primaryBtnSx}
                               >
                                 生成
                               </Button>
                               <Button
                                 variant="outlined"
                                 size="small"
-                                sx={{ minWidth: 72, fontWeight: 800, borderWidth: 2, borderColor: accent, color: accent }}
+                                sx={secondaryBtnSx}
                               >
                                 重新生成
                               </Button>
@@ -732,13 +1407,7 @@ const NewsPage: React.FC = () => {
                                   variant="outlined"
                                   size="small"
                                   onClick={() => deleteRow(row.id)}
-                                  sx={{
-                                    minWidth: 72,
-                                    fontWeight: 800,
-                                    borderWidth: 2,
-                                    borderColor: accent,
-                                    color: accent,
-                                  }}
+                                  sx={dangerBtnSx}
                                 >
                                   删除行
                                 </Button>
@@ -746,6 +1415,29 @@ const NewsPage: React.FC = () => {
                                 <Box sx={{ height: 30 }} />
                               )}
                             </Box>
+                          </Box>
+
+                          {/* 角色列展开/收缩：每行右下角 */}
+                          <Box
+                            onClick={() => toggleRowRoleExpanded(row.id)}
+                            role="button"
+                            aria-label={isRoleExpanded ? '收缩角色内容' : '展开角色内容'}
+                            sx={{
+                              position: 'absolute',
+                              right: 10,
+                              bottom: 8,
+                              cursor: 'pointer',
+                              userSelect: 'none',
+                              color: alpha(theme.palette.text.secondary, 0.85),
+                              fontSize: 12,
+                              fontWeight: 800,
+                              zIndex: 2,
+                              '&:hover': {
+                                color: alpha(theme.palette.text.secondary, 1),
+                              },
+                            }}
+                          >
+                            {isRoleExpanded ? '收缩' : '展开'}
                           </Box>
                         </Box>
                       );
@@ -781,7 +1473,9 @@ const NewsPage: React.FC = () => {
                   </Box>
                 </Tooltip>
               </Box>
-            </Box>
+                </Box>
+              )}
+            </>
           )}
         </Box>
       </Box>

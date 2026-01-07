@@ -1,9 +1,46 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Alert, Box, Button, CircularProgress, Paper, TextField, Typography } from '@mui/material';
+import { Alert, Box, Button, CircularProgress, Paper, TextField, Tooltip, Typography } from '@mui/material';
+import { keyframes } from '@mui/material/styles';
 
 const API_BASE = process.env.REACT_APP_API_BASE || 'http://localhost:8000';
 
-export const ScriptAnalysisPanel: React.FC = () => {
+const dotJump = keyframes`
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.55; }
+  30% { transform: translateY(-4px); opacity: 1; }
+`;
+
+const JumpingDots: React.FC = () => (
+  <Box sx={{ display: 'inline-flex', alignItems: 'flex-end', gap: 0.45, lineHeight: 1 }}>
+    {[0, 1, 2].map((i) => (
+      <Box
+        // eslint-disable-next-line react/no-array-index-key
+        key={i}
+        component="span"
+        sx={{
+          width: 5,
+          height: 5,
+          borderRadius: '50%',
+          bgcolor: 'currentColor',
+          display: 'inline-block',
+          animation: `${dotJump} 900ms ease-in-out infinite`,
+          animationDelay: `${i * 120}ms`,
+        }}
+      />
+    ))}
+  </Box>
+);
+
+export type ScriptToAnimationPayload = {
+  tweetText: string;
+  storyboardScript: string;
+};
+
+export const ScriptAnalysisPanel: React.FC<{
+  onSendToAnimation?: (payload: ScriptToAnimationPayload) => void;
+  sendToAnimationLoading?: boolean;
+  sendToAnimationError?: string | null;
+}> = (props) => {
+  const { onSendToAnimation, sendToAnimationLoading, sendToAnimationError } = props;
   const [inputText, setInputText] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -108,6 +145,22 @@ export const ScriptAnalysisPanel: React.FC = () => {
   };
 
   const canSubmit = useMemo(() => !!inputText.trim() && !isGenerating, [inputText, isGenerating]);
+
+  const canSendToAnimation = useMemo(() => {
+    const storyboardScript = shotBlocks.length ? shotBlocks.join('\n\n') : rawResultText;
+    return !!storyboardScript.trim() && !isGenerating && !sendToAnimationLoading;
+  }, [shotBlocks, rawResultText, isGenerating, sendToAnimationLoading]);
+
+  const handleSendToAnimation = () => {
+    const storyboardScript = shotBlocks.length ? shotBlocks.join('\n\n') : rawResultText;
+    const tweetText = inputText;
+    if (!onSendToAnimation) return;
+    if (!storyboardScript.trim()) {
+      setError('请先生成分镜脚本，再一键添加到动画制作');
+      return;
+    }
+    onSendToAnimation({ tweetText, storyboardScript });
+  };
 
   const handleClear = () => {
     setInputText('');
@@ -313,6 +366,79 @@ export const ScriptAnalysisPanel: React.FC = () => {
                   />
                 </Paper>
               ))}
+
+              {/* 底部添加按钮区域 */}
+              <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', py: 2, gap: 1.2 }}>
+                <Tooltip
+                  title="一键添加脚本至动画制作"
+                  arrow
+                  placement="top"
+                  slotProps={{
+                    popper: {
+                      modifiers: [
+                        {
+                          name: 'offset',
+                          options: {
+                            offset: [0, -8],
+                          },
+                        },
+                      ],
+                    },
+                  }}
+                >
+                  <Box
+                    onClick={handleSendToAnimation}
+                    role="button"
+                    aria-label="一键添加脚本至动画制作"
+                    sx={{
+                      width: 60,
+                      height: 60,
+                      borderRadius: '50%',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      cursor: 'pointer',
+                      transition: 'all 0.2s',
+                      '&:hover': {
+                        transform: 'scale(1.1)',
+                      },
+                      ...(!canSendToAnimation
+                        ? {
+                            opacity: 0.55,
+                            cursor: 'not-allowed',
+                            pointerEvents: 'none',
+                          }
+                        : null),
+                    }}
+                  >
+                    <Box
+                      sx={{
+                        width: 40,
+                        height: 40,
+                        borderRadius: '50%',
+                        bgcolor: '#2563eb',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        boxShadow: '0 4px 12px rgba(37, 99, 235, 0.25)',
+                        color: '#fff',
+                      }}
+                    >
+                      {sendToAnimationLoading ? (
+                        <JumpingDots />
+                      ) : (
+                        <img
+                          src="/send.svg"
+                          alt="send"
+                          style={{ width: 20, height: 20, filter: 'brightness(0) invert(1)' }}
+                        />
+                      )}
+                    </Box>
+                  </Box>
+                </Tooltip>
+
+                {sendToAnimationError ? <Alert severity="error">{sendToAnimationError}</Alert> : null}
+              </Box>
             </Box>
           )}
 

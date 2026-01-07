@@ -1,10 +1,11 @@
-import React, { useState } from 'react';
-import { Box, Paper, ThemeProvider, Typography, Tooltip, createTheme } from '@mui/material';
-import { useNavigate } from 'react-router-dom';
+import React, { useMemo, useState } from 'react';
+import { Box, InputBase, Paper, ThemeProvider, Typography, Tooltip, createTheme } from '@mui/material';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { TopNavBar } from '../shared/TopNavBar';
 import { AiAnimationSubNav, AiAnimationSubSection } from './AiAnimationSubNav';
 import { RoleImageGeneratorPanel } from './RoleImageGeneratorPanel';
 import { ScriptAnalysisPanel } from './ScriptAnalysisPanel';
+import { AiVideoEditPage } from './AiVideoEditPage';
 
 const theme = createTheme({
   palette: {
@@ -20,9 +21,18 @@ const theme = createTheme({
 
 export const AiAnimationPage: React.FC = () => {
   const navigate = useNavigate();
+  const location = useLocation();
+
+  const topTab = useMemo<'animation' | 'video'>(() => {
+    if (location.pathname === '/ai-video-edit') return 'video';
+    return 'animation';
+  }, [location.pathname]);
+
   const [sub, setSub] = useState<AiAnimationSubSection>('role');
   const [scriptInstance, setScriptInstance] = useState(0);
   const [animationRows, setAnimationRows] = useState(2);
+  const [storyboardScripts, setStoryboardScripts] = useState<string[]>(() => Array.from({ length: 2 }, () => ''));
+  const [videoScripts, setVideoScripts] = useState<string[]>(() => Array.from({ length: 2 }, () => ''));
 
   const handleSubChange = (next: AiAnimationSubSection) => {
     if (sub === 'script' && next !== 'script') {
@@ -59,139 +69,219 @@ export const AiAnimationPage: React.FC = () => {
         >
           {/* 顶部两项：ai动画制作 / ai视频剪辑 */}
           <Box sx={{ display: 'flex', justifyContent: 'center', gap: 10, mb: 6 }}>
-            <Typography sx={{ fontWeight: 900, color: '#f97316', cursor: 'default' }}>ai动画制作</Typography>
             <Typography
-              sx={{ fontWeight: 900, color: '#94a3b8', cursor: 'pointer' }}
-              onClick={() => navigate('/ai-video-edit')}
+              sx={{
+                fontWeight: 900,
+                color: topTab === 'animation' ? '#f97316' : '#94a3b8',
+                cursor: topTab === 'animation' ? 'default' : 'pointer',
+              }}
+              onClick={topTab === 'animation' ? undefined : () => navigate('/ai-animation')}
+            >
+              ai动画制作
+            </Typography>
+            <Typography
+              sx={{
+                fontWeight: 900,
+                color: topTab === 'video' ? '#f97316' : '#94a3b8',
+                cursor: topTab === 'video' ? 'default' : 'pointer',
+              }}
+              onClick={topTab === 'video' ? undefined : () => navigate('/ai-video-edit')}
             >
               ai视频剪辑
             </Typography>
           </Box>
 
-          {/* 红线下方：二级导航 */}
-          <Box sx={{ mb: 3 }}>
-            <AiAnimationSubNav value={sub} onChange={handleSubChange} />
-          </Box>
-
-          {sub === 'role' ? (
+          {/* 红框下方：仅此区域根据顶部 tab 切换 */}
+          {topTab === 'video' ? (
             <Box sx={{ mb: 3 }}>
-              <RoleImageGeneratorPanel />
-            </Box>
-          ) : sub === 'script' ? (
-            <Box sx={{ mb: 3 }}>
-              <ScriptAnalysisPanel key={`script-${scriptInstance}`} />
+              <AiVideoEditPage embedded />
             </Box>
           ) : (
-            <Box>
-              <Paper
-                elevation={0}
-                sx={{
-                  p: 0,
-                  bgcolor: 'rgba(255, 255, 255, 0.75)',
-                  backdropFilter: 'blur(20px) saturate(180%)',
-                  border: '1px solid rgba(255, 255, 255, 0.6)',
-                  borderRadius: '16px',
-                  overflow: 'hidden',
-                  width: '100%',
-                  // 让表格整体更矮一些
-                  minHeight: { xs: 220, md: 260 },
-                }}
-              >
-                {(() => {
-                  const headers = ['分镜脚本', '角色', '操作', '九宫格图像', '视频脚本', '生成视频', '操作'];
-                  const borderColor = 'rgba(15, 23, 42, 0.18)';
-                  const border = `2px solid ${borderColor}`;
-                  const gridCols = '1.05fr 1.55fr 0.55fr 1.05fr 1.05fr 1.25fr 0.55fr';
-                  const rowHeight = { xs: 150, md: 190 };
-                  return (
-                    <Box
-                      sx={{
-                        width: '100%',
-                        borderLeft: border,
-                        borderRight: border,
-                        borderTop: border,
-                        borderBottom: border,
-                        boxSizing: 'border-box',
-                      }}
-                    >
-                      {/* 表头 */}
-                      <Box sx={{ display: 'grid', gridTemplateColumns: gridCols, width: '100%' }}>
-                        {headers.map((t, idx) => (
-                          <Box
-                            key={t}
-                            sx={{
-                              textAlign: 'center',
-                              fontWeight: 900,
-                              color: '#0f172a',
-                              py: 2,
-                              borderBottom: border,
-                              borderRight: idx === headers.length - 1 ? 'none' : border,
-                            }}
-                          >
-                            {t}
-                          </Box>
-                        ))}
-                      </Box>
+            <>
+              {/* 二级导航 */}
+              <Box sx={{ mb: 3 }}>
+                <AiAnimationSubNav value={sub} onChange={handleSubChange} />
+              </Box>
 
-                      {/* 内容区（空），竖线贯穿到底部 */}
-                      <Box sx={{ width: '100%' }}>
-                        {Array.from({ length: animationRows }).map((_, rowIdx) => (
-                          <Box
-                            key={rowIdx}
-                            sx={{
-                              display: 'grid',
-                              gridTemplateColumns: gridCols,
-                              width: '100%',
-                              height: rowHeight,
-                              bgcolor: 'rgba(255, 255, 255, 0.35)',
-                              borderBottom: rowIdx === animationRows - 1 ? 'none' : border,
-                            }}
-                          >
-                            {headers.map((__, colIdx) => (
-                              <Box
-                                key={colIdx}
-                                sx={{
-                                  borderRight: colIdx === headers.length - 1 ? 'none' : border,
-                                  height: '100%',
-                                }}
-                              />
-                            ))}
-                          </Box>
-                        ))}
-                      </Box>
-                    </Box>
-                  );
-                })()}
-              </Paper>
-
-              {/* 容器外边底部的按钮：只保留图标（无白色方块底） */}
-              <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 1 }}>
-                <Tooltip title="增加视频栏" placement="top">
-                  <Box
-                    role="button"
-                    aria-label="增加视频栏"
-                    onClick={() => setAnimationRows((v) => v + 1)}
+              {sub === 'role' ? (
+                <Box sx={{ mb: 3 }}>
+                  <RoleImageGeneratorPanel />
+                </Box>
+              ) : sub === 'script' ? (
+                <Box sx={{ mb: 3 }}>
+                  <ScriptAnalysisPanel key={`script-${scriptInstance}`} />
+                </Box>
+              ) : (
+                <Box>
+                  <Paper
+                    elevation={0}
                     sx={{
-                      width: 22,
-                      height: 22,
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      cursor: 'pointer',
-                      userSelect: 'none',
-                      '&:hover img': { opacity: 0.85 },
+                      p: 0,
+                      bgcolor: 'rgba(255, 255, 255, 0.75)',
+                      backdropFilter: 'blur(20px) saturate(180%)',
+                      border: '1px solid rgba(255, 255, 255, 0.6)',
+                      borderRadius: '16px',
+                      overflow: 'hidden',
+                      width: '100%',
+                      minHeight: { xs: 220, md: 260 },
                     }}
                   >
-                    <Box
-                      component="img"
-                      src={`${process.env.PUBLIC_URL || ''}/add.svg`}
-                      alt="add"
-                      sx={{ width: 18, height: 18, display: 'block' }}
-                    />
+                    {(() => {
+                      const headers = ['分镜脚本', '角色', '操作', '九宫格图像', '视频脚本', '生成视频', '操作'];
+                      const borderColor = 'rgba(15, 23, 42, 0.18)';
+                      const border = `2px solid ${borderColor}`;
+                      const gridCols = '1.05fr 1.55fr 0.55fr 1.05fr 1.05fr 1.25fr 0.55fr';
+                      const rowHeight = { xs: 150, md: 190 };
+                      return (
+                        <Box
+                          sx={{
+                            width: '100%',
+                            borderLeft: border,
+                            borderRight: border,
+                            borderTop: border,
+                            borderBottom: border,
+                            boxSizing: 'border-box',
+                          }}
+                        >
+                          <Box sx={{ display: 'grid', gridTemplateColumns: gridCols, width: '100%' }}>
+                            {headers.map((t, idx) => (
+                              <Box
+                                key={t}
+                                sx={{
+                                  textAlign: 'center',
+                                  fontWeight: 900,
+                                  color: '#0f172a',
+                                  py: 2,
+                                  borderBottom: border,
+                                  borderRight: idx === headers.length - 1 ? 'none' : border,
+                                }}
+                              >
+                                {t}
+                              </Box>
+                            ))}
+                          </Box>
+
+                          <Box sx={{ width: '100%' }}>
+                            {Array.from({ length: animationRows }).map((_, rowIdx) => (
+                              <Box
+                                key={rowIdx}
+                                sx={{
+                                  display: 'grid',
+                                  gridTemplateColumns: gridCols,
+                                  width: '100%',
+                                  height: rowHeight,
+                                  bgcolor: 'rgba(255, 255, 255, 0.35)',
+                                  borderBottom: rowIdx === animationRows - 1 ? 'none' : border,
+                                }}
+                              >
+                                {headers.map((__, colIdx) => (
+                                  <Box
+                                    key={colIdx}
+                                    sx={{
+                                      borderRight: colIdx === headers.length - 1 ? 'none' : border,
+                                      height: '100%',
+                                      px: colIdx === 0 || colIdx === 4 ? 1.2 : 0,
+                                      py: colIdx === 0 || colIdx === 4 ? 1.1 : 0,
+                                      display: colIdx === 0 || colIdx === 4 ? 'flex' : 'block',
+                                      alignItems: colIdx === 0 || colIdx === 4 ? 'stretch' : 'initial',
+                                    }}
+                                  >
+                                    {colIdx === 0 ? (
+                                      <InputBase
+                                        value={storyboardScripts[rowIdx] ?? ''}
+                                        onChange={(e) =>
+                                          setStoryboardScripts((prev) => {
+                                            const next = prev.slice();
+                                            next[rowIdx] = e.target.value;
+                                            return next;
+                                          })
+                                        }
+                                        multiline
+                                        placeholder="请输入分镜脚本"
+                                        sx={{
+                                          width: '100%',
+                                          height: '100%',
+                                          fontSize: 13,
+                                          fontWeight: 700,
+                                          color: '#0f172a',
+                                          '& textarea': {
+                                            height: '100% !important',
+                                            overflow: 'auto',
+                                            resize: 'none',
+                                            lineHeight: 1.35,
+                                          },
+                                        }}
+                                      />
+                                    ) : colIdx === 4 ? (
+                                      <InputBase
+                                        value={videoScripts[rowIdx] ?? ''}
+                                        onChange={(e) =>
+                                          setVideoScripts((prev) => {
+                                            const next = prev.slice();
+                                            next[rowIdx] = e.target.value;
+                                            return next;
+                                          })
+                                        }
+                                        multiline
+                                        placeholder="请输入视频脚本"
+                                        sx={{
+                                          width: '100%',
+                                          height: '100%',
+                                          fontSize: 13,
+                                          fontWeight: 700,
+                                          color: '#0f172a',
+                                          '& textarea': {
+                                            height: '100% !important',
+                                            overflow: 'auto',
+                                            resize: 'none',
+                                            lineHeight: 1.35,
+                                          },
+                                        }}
+                                      />
+                                    ) : null}
+                                  </Box>
+                                ))}
+                              </Box>
+                            ))}
+                          </Box>
+                        </Box>
+                      );
+                    })()}
+                  </Paper>
+
+                  <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 1 }}>
+                    <Tooltip title="增加视频栏" placement="top">
+                      <Box
+                        role="button"
+                        aria-label="增加视频栏"
+                        onClick={() => {
+                          setAnimationRows((v) => v + 1);
+                          setStoryboardScripts((prev) => [...prev, '']);
+                          setVideoScripts((prev) => [...prev, '']);
+                        }}
+                        sx={{
+                          width: 22,
+                          height: 22,
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          cursor: 'pointer',
+                          userSelect: 'none',
+                          '&:hover img': { opacity: 0.85 },
+                        }}
+                      >
+                        <Box
+                          component="img"
+                          src={`${process.env.PUBLIC_URL || ''}/add.svg`}
+                          alt="add"
+                          sx={{ width: 18, height: 18, display: 'block' }}
+                        />
+                      </Box>
+                    </Tooltip>
                   </Box>
-                </Tooltip>
-              </Box>
-            </Box>
+                </Box>
+              )}
+            </>
           )}
         </Box>
       </Box>
